@@ -15,3 +15,14 @@ class TaskState(Enum):
     EXECUTING = "executing"
     COMPLETED = "completed"
 
+@dataclass
+class TaskExecutionInfo:
+    task_id: int
+    induct_pos: Tuple[float, float]
+    eject_pos: Tuple[float, float]
+    state: TaskState
+    path: Optional[List[Tuple[int, int, int]]] = None
+    current_path_index: int = 0
+    assigned_time: Optional[float] = None
+    start_time: Optional[float] = None
+    completion_time: Optional[float] = None
