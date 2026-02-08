@@ -84,3 +84,21 @@ class AgentState:
         if self.is_idle and len(self.planned_tasks) > 0:
             self.is_idle = False
     
+    def assign_path(self, path: List[Tuple[int, int, int]]):
+        """
+        Set the current path for the agent to execute the current task
+        """
+
+        if self.current_task is None and len(self.planned_tasks) > 0:
+            # Start executing the first planned task
+            self.current_task = self.planned_tasks.pop(0)
+            self.current_task.state = TaskState.EXECUTING
+
+        if self.current_task is not None:
+            # Update the current task with the new path and reset path index
+            self.current_task.path = path
+            self.current_task.current_path_index = 0
+            
+            # Update the agent's current path and reset path index for execution
+            self.current_path = path
+            self.current_path_index = 0
