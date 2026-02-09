@@ -188,3 +188,33 @@ class AgentState:
             return self.planned_tasks[0].induct_pos
         else:
             return None
+        
+    def has_tasks(self) -> bool:
+        """
+        Check if the agent has any tasks (planned or executing)
+        """
+        return self.current_task is not None or len(self.planned_tasks) > 0
+    
+    def get_status_summary(self) -> Dict:
+        """
+        Get summary of agent's current state for debugging/logging.
+        
+        Returns:
+            dict with status information
+        """
+        return {
+            'agent_id': self.agent_id,
+            'position': tuple(self.pos),
+            'is_idle': self.is_idle,
+            'is_stuck': self.is_stuck,
+            'current_task': self.current_task.task_id if self.current_task else None,
+            'num_planned': len(self.planned_tasks),
+            'num_completed': len(self.completed_tasks),
+            'path_progress': f"{self.current_path_index}/{len(self.current_path) if self.current_path else 0}",
+            'timestep': self.current_timestep
+        }
+    
+    def __repr__(self):
+        status = "IDLE" if self.is_idle else "BUSY"
+        task_info = f"task={self.current_task.task_id}" if self.current_task else "no task"
+        return f"Agent{self.agent_id}@{tuple(self.pos)} [{status}] {task_info}"
