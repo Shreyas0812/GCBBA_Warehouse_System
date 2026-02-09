@@ -38,7 +38,7 @@ class AgentState:
      - Provides methods to update execution state and retrieve current task info
     """
 
-    def __init__(self, agent_id: int, initial_position: Tuple[float, float], speed: float):
+    def __init__(self, agent_id: int, initial_position: Tuple[float, float, float], speed: float):
         self.agent_id = agent_id
         self.pos = np.array(initial_position, dtype=np.float32)
         self.speed = speed
@@ -56,17 +56,17 @@ class AgentState:
         self.is_idle = True
         self.is_stuck = False # flag to indicate if agent is stuck (e.g. due to collision or path blockage)
 
-        self.position_history: List[Tuple[float, float]] = [initial_position] # track position history 
+        self.position_history: List[Tuple[float, float, float]] = [initial_position] # track position history 
 
-        self.current_timestamp: int = 0
+        self.current_timestep: int = 0
 
-    def update_from_gcbba(self, assigned_tasks: List[Dict], current_timestamp: int):
+    def update_from_gcbba(self, assigned_tasks: List[Dict], current_timestep: int):
         """
         Update agent state based on GCBBA task assignments
         - assigned_tasks: List of task dicts assigned to this agent by GCBBA
-        - current_timestamp: Current simulation timestamp for timing info
+        - current_timestep: Current simulation timestamp for timing info
         """
-        self.current_timestamp = current_timestamp
+        self.current_timestep = current_timestep
 
         new_planned_tasks = []
         for task in assigned_tasks:
@@ -75,7 +75,7 @@ class AgentState:
                 induct_pos=tuple(task['induct_pos']),
                 eject_pos=tuple(task['eject_pos']),
                 state=TaskState.PLANNED,
-                assigned_time=current_timestamp
+                assigned_time=current_timestep
             )
             new_planned_tasks.append(task_info)
 
@@ -102,3 +102,51 @@ class AgentState:
             # Update the agent's current path and reset path index for execution
             self.current_path = path
             self.current_path_index = 0
+
+    def step(self, timestep:int) -> bool:
+        """
+        Execute one step of the agent's current task based on the assigned path
+        """
+
+        if self.current_path is None or len(self.current_path) == 0:
+            self.position_history.append((self.pos[0], self.pos[1], self.pos[2], timestep))
+            return False
+        
+        # If the agent is currently executing a task, move along the assigned path
+        if self.current_path_index < len(self.current_path):
+            next_pos = self.current_path[self.current_path_index]
+            self.pos = np.array(next_pos, dtype=np.float32)
+            self.current_path_index += 1
+
+            self.position_history.append((self.pos[0], self.pos[1], self.pos[2], timestep))
+
+            if self.current_path_index >= len(self.current_path):
+                return self._complete_current_task(timestep)
+        
+        return False
+
+    def _complete_current_task(self, timestep: int) -> bool:
+        """
+        Mark the current task as completed and update state
+        Then transition to the next planned task if available
+        """
+
+        if self.current_task is not None:
+            self.current_task.state = TaskState.COMPLETED
+            self.current_task.completion_time = timestep
+            self.completed_tasks.append(self.current_task)
+
+            # Reset current task and path info
+            self.current_task = None
+            self.current_path = None
+            self.current_path_index = 0
+
+            # Check if there are more planned tasks to execute
+            if len(self.planned_tasks) > 0:
+                self.is_idle = False
+            else:
+                self.is_idle = True
+
+            return True
+        
+        return False
