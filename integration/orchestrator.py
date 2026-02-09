@@ -1,6 +1,9 @@
 import os
 from typing import Tuple
 
+from collision_avoidance.grid_map import GridMap
+from collision_avoidance.time_based_collision_avoidance import TimeBasedCollisionAvoidance
+
 class IntegrationOrchestrator:
     """
     Main Integration Orchestrator
@@ -31,6 +34,8 @@ class IntegrationOrchestrator:
         self.prediction_horizon = prediction_horizon
         self.max_plan_time = max_plan_time
 
+        self.grid_map = GridMap(config_path)
+        self.ca = TimeBasedCollisionAvoidance(self.grid_map)
         
 
 if __name__ == "__main__":
