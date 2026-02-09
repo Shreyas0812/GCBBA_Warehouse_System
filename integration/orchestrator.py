@@ -1,5 +1,5 @@
 import os
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 import yaml
 import networkx as nx
 import numpy as np
@@ -7,8 +7,10 @@ import numpy as np
 from collision_avoidance.grid_map import GridMap
 from collision_avoidance.time_based_collision_avoidance import TimeBasedCollisionAvoidance
 
-from gcbba import GCBBA_Orchestrator
+from gcbba.GCBBA_Orchestrator import GCBBA_Orchestrator
 from gcbba.tools_warehouse import agent_init, create_graph_with_range, task_init
+
+from integration.agent_state import AgentState
 
 class IntegrationOrchestrator:
     """
@@ -47,6 +49,7 @@ class IntegrationOrchestrator:
 
         self._load_config()
         self._init_gcbba()
+        self._init_agent_states()
 
     def _load_config(self) -> None:
         with open(self.config_path, 'r') as f:
@@ -80,13 +83,23 @@ class IntegrationOrchestrator:
         agents = agent_init(self.agent_positions, sp_lim=self.sp_lim)
         tasks = task_init(self.induct_positions, self.eject_positions, task_per_induct_station=self.tasks_per_induct_station)
 
-        if Lt is None:
+        if self.Lt is None:
             nt = len(self.induct_positions) * self.tasks_per_induct_station
             na = len(self.agent_positions)
             Lt = int(np.ceil(nt / na))
         
         self.gcbba_orchestrator = GCBBA_Orchestrator(G, D, tasks, agents, Lt)
 
+    def _init_agent_states(self) -> None:
+        self.agent_states: List[AgentState] = []
+        for idx, agent_pos in enumerate(self.agent_positions):
+            agent_id = idx
+            grid_pos = self.grid_map.continuous_to_grid(float(agent_pos[:3][0]), float(agent_pos[:3][1]), float(agent_pos[:3][2]))
+            # speed 
+            # self.agent_states.append(AgentState(agent_id, grid_pos))
+
 if __name__ == "__main__":
     PROJECT_ROOT = os.path.abspath(os.path.dirname(__file__))
     config_path = os.path.join(PROJECT_ROOT, "..", "config", "gridworld_warehouse_small.yaml")
+
+    orchestrator = IntegrationOrchestrator(config_path)
