@@ -150,3 +150,19 @@ class AgentState:
             return True
         
         return False
+    
+    def get_predicted_position(self, steps_ahead: int = 5) -> Tuple[float, float, float]:
+        """
+        Predict the agent's future position based on current path and speed
+        - steps_ahead: Number of steps to predict into the future
+        """ 
+        if self.current_path is None or len(self.current_path) == 0:
+            return (self.pos[0], self.pos[1], self.pos[2])
+        
+        predicted_idx = min(self.current_path_index + steps_ahead, len(self.current_path) - 1)
+
+        if predicted_idx < len(self.current_path):
+            predicted_pos = self.current_path[predicted_idx]
+            return predicted_pos
+        else:
+            return self.current_path[-1]
