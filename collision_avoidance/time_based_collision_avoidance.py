@@ -3,7 +3,7 @@ import os
 import sys
 from collections import defaultdict
 
-from grid_map import GridMap
+from collision_avoidance.grid_map import GridMap
 
 class TimeBasedCollisionAvoidance:
     """

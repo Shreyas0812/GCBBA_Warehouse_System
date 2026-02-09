@@ -4,8 +4,8 @@ import time
 from tqdm import tqdm
 import copy
 
-from GCBBA_Task import GCBBA_Task
-from GCBBA_Agent import GCBBA_Agent
+from gcbba.GCBBA_Task import GCBBA_Task
+from gcbba.GCBBA_Agent import GCBBA_Agent
 
 class GCBBA_Orchestrator:
     """
