@@ -1,5 +1,6 @@
 import os
 from typing import Tuple
+import yaml
 
 from collision_avoidance.grid_map import GridMap
 from collision_avoidance.time_based_collision_avoidance import TimeBasedCollisionAvoidance
@@ -36,6 +37,28 @@ class IntegrationOrchestrator:
 
         self.grid_map = GridMap(config_path)
         self.ca = TimeBasedCollisionAvoidance(self.grid_map)
+
+        self._load_config()
+
+    def _load_config(self) -> None:
+        with open(self.config_path, 'r') as f:
+            config = yaml.safe_load(f)
+        
+        params = config["create_gridworld_node"]["ros__parameters"]
+
+        agent_pos_flat = params['agent_positions']
+        self.agent_positions = [(agent_pos_flat[i], agent_pos_flat[i+1], agent_pos_flat[i+2], i//3 + 1) 
+                                for i in range(0, len(agent_pos_flat), 3)]
+        
+        induct_pos_flat = params['induct_stations']
+        self.induct_positions = [(induct_pos_flat[i], induct_pos_flat[i+1], induct_pos_flat[i+2], induct_pos_flat[i+3]) 
+                                 for i in range(0, len(induct_pos_flat), 4)]
+        
+        eject_pos_flat = params['eject_stations']
+        self.eject_positions = [(eject_pos_flat[i], eject_pos_flat[i+1], eject_pos_flat[i+2], eject_pos_flat[i+3]) 
+                                for i in range(0, len(eject_pos_flat), 4)]
+
+
         
 
 if __name__ == "__main__":
