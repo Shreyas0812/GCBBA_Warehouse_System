@@ -156,6 +156,14 @@ class IntegrationOrchestrator:
         return events
 
     def run_gcbba(self) -> None:
+        # clearing previous GCBBA state to ensure fresh planning based on current agent positions and completed tasks
+        self.gcbba_orchestrator.initialize_all()
+
+        if self.current_timestep > 0:
+            for i, agent_state in enumerate(self.agent_states):
+                predicted_pos = agent_state.get_predicted_position(self.prediction_horizon)
+                self.gcbba_orchestrator.agents[i].pos = predicted_pos
+
         assignment, total_score, makespan = self.gcbba_orchestrator.launch_agents()
 
         self.latest_assignment = assignment
