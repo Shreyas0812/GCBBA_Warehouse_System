@@ -101,14 +101,23 @@ class IntegrationOrchestrator:
             self.agent_states.append(AgentState(agent_id=gcbba_agent.id, initial_position=grid_pos, speed=gcbba_agent.speed))
 
     def run_simulation(self, timesteps: int = 100) -> None:
-        for t in tqdm(range(timesteps), desc="Simulation Progress"):
-            print(f"--- Timestep {t} ---")
+        for _ in tqdm(range(timesteps), desc="Simulation Progress"):
+            self.step()
+            # Main simulation loop logic:
             # 1. Get current task assignments from GCBBA
             # 2. Update AgentState with new assignments
             # 3. Call collision avoidance for path planning/replanning
             # 4. Step simulation forward and update AgentState with new positions and task statuses
-            # 5. Trigger GCBBA replanning at specified intervals or when certain conditions are met (e.g. task completion, new tasks added, etc.)
+            # 5. Trigger GCBBA replanning at specified intervals or when certain conditions are met (e.g. task completion, new tasks added, rerun time etc.)
             pass  # Placeholder for main simulation loop logic
+    
+    def step(self) -> None:
+        """
+        Step the simulation forward by one timestep.
+        """
+        # Placeholder for stepping logic
+        print("Stepping simulation forward by one timestep.")
+        pass
 
 if __name__ == "__main__":
     PROJECT_ROOT = os.path.abspath(os.path.dirname(__file__))
