@@ -94,11 +94,9 @@ class IntegrationOrchestrator:
 
     def _init_agent_states(self) -> None:
         self.agent_states: List[AgentState] = []
-        # for idx, agent_pos in enumerate(self.agent_positions):
-            # agent_id = self.
-            # grid_pos = self.grid_map.continuous_to_grid(float(agent_pos[:3][0]), float(agent_pos[:3][1]), float(agent_pos[:3][2]))
-            # speed = agent_pos[3]
-            # self.agent_states.append(AgentState(agent_id, grid_pos))
+        for idx, gcbba_agent in enumerate(self.gcbba_orchestrator.agents):
+            grid_pos = self.grid_map.continuous_to_grid(float(gcbba_agent.pos[0]), float(gcbba_agent.pos[1]), float(gcbba_agent.pos[2]))
+            self.agent_states.append(AgentState(agent_id=gcbba_agent.id, initial_position=grid_pos, speed=gcbba_agent.speed))
 
 if __name__ == "__main__":
     PROJECT_ROOT = os.path.abspath(os.path.dirname(__file__))
