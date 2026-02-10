@@ -134,6 +134,8 @@ class IntegrationOrchestrator:
         if self.current_timestep == 0 or self.last_gcbba_timestep < 0:
             self.run_gcbba()
 
+        self._plan_paths()
+
     def run_gcbba(self) -> None:
         assignment, total_score, makespan = self.gcbba_orchestrator.launch_agents()
 
@@ -174,6 +176,34 @@ class IntegrationOrchestrator:
             assignments_dict[agent_idx] = tasks_for_agent
         
         return assignments_dict
+
+    def _plan_paths(self) -> None:
+        replan_agents = [agent_state for agent_state in self.agent_states if agent_state.needs_new_path] # Set in gcbba
+
+        if not replan_agents:
+            return
+
+        for agent_state in replan_agents:
+            goal = agent_state.get_current_goal()
+
+            if goal is None:
+                start = agent_state.get_position()
+                self.ca.reserve_path([start], agent_state.agent_id)
+                continue
+
+            start = agent_state.get_position()
+            path = self.ca.plan_path_with_reservations(
+                start=start,
+                goal=goal,
+                agent_id=agent_state.agent_id,
+                max_time=self.max_plan_time
+            )
+
+            if path is None:
+                path = [start]  # No path found, stay in place
+            
+            agent_state.assign_path(path)
+            self.ca.reserve_path(path, agent_state.agent_id)
 
 if __name__ == "__main__":
     PROJECT_ROOT = os.path.abspath(os.path.dirname(__file__))
