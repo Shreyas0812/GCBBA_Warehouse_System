@@ -26,9 +26,13 @@ def create_graph_with_range(agent_positions, comm_range):
     raw_graph = nx.Graph()
     raw_graph.add_nodes_from(agent_ids)
     
-    # Helper function to calculate 2D Euclidean distance
+    # Helper function to calculate 3D Euclidean distance
     def distance(pos1, pos2):
-        return np.sqrt((pos1[0] - pos2[0])**2 + (pos1[1] - pos2[1])**2)
+        return np.sqrt(
+            (pos1[0] - pos2[0])**2
+            + (pos1[1] - pos2[1])**2
+            + (pos1[2] - pos2[2])**2
+        )
     
     # Add edges between agents if within communication range
     for i, agent_id_i in enumerate(agent_ids):
@@ -51,11 +55,11 @@ def agent_init(agent_positions, sp_lim=[1, 5]):
     :param sp_lim: agent speed limits
     :return: agents list
     """
-    # Agents: [x_pos, y_pos, speed]
+    # Agents: [x_pos, y_pos, z_pos, speed, id]
     agents = []
     for pos in agent_positions:
         speed = np.random.uniform(sp_lim[0], sp_lim[1], 1)
-        agents.append(np.concatenate(([pos[0], pos[1]], speed, pos[-1:])))
+        agents.append(np.concatenate(([pos[0], pos[1], pos[2]], speed, pos[-1:])))
     
     return agents
 
@@ -68,12 +72,23 @@ def task_init(induct_positions, eject_positions, task_per_induct_station):
     :param task_per_induct_station: Number of tasks per induct station
     :return: tasks list
     """
-    # Tasks: [x_pos, y_pos, duration, lambda, weight]
+    # Tasks: [induct_x, induct_y, induct_z, eject_x, eject_y, eject_z]
     tasks = []
     for current_induct_position in induct_positions:
         for _ in range(task_per_induct_station):
             random_eject_position = eject_positions[np.random.randint(0, len(eject_positions))]
-            tasks.append(np.array([current_induct_position[0], current_induct_position[1], random_eject_position[0], random_eject_position[1]]))
+            tasks.append(
+                np.array(
+                    [
+                        current_induct_position[0],
+                        current_induct_position[1],
+                        current_induct_position[2],
+                        random_eject_position[0],
+                        random_eject_position[1],
+                        random_eject_position[2],
+                    ]
+                )
+            )
     return tasks
 
 
@@ -136,9 +151,13 @@ def create_graph_with_range2(agent_positions, induct_positions, comm_range):
     raw_graph = nx.Graph()
     raw_graph.add_nodes_from(all_node_ids)
     
-    # Helper function to calculate 2D Euclidean distance
+    # Helper function to calculate 3D Euclidean distance
     def distance(pos1, pos2):
-        return np.sqrt((pos1[0] - pos2[0])**2 + (pos1[1] - pos2[1])**2)
+        return np.sqrt(
+            (pos1[0] - pos2[0])**2
+            + (pos1[1] - pos2[1])**2
+            + (pos1[2] - pos2[2])**2
+        )
     
     # Add edges between agents if within communication range
     for i, agent_id_i in enumerate(agent_ids):

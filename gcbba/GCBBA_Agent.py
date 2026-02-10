@@ -20,10 +20,10 @@ class GCBBA_Agent:
         self.na = G.shape[0]
         # int, number of neighbors according to G
         self.nb_neigh = np.sum(self.G[id, :])
-        # tuple, position in cartesian plane
-        self.pos = np.array([char_a[0], char_a[1]])
-        self.speed = char_a[2]
-        self.agent_id = char_a[3]  # Unique agent identifier from warehouse config
+        # tuple, position in cartesian space
+        self.pos = np.array([char_a[0], char_a[1], char_a[2]])
+        self.speed = char_a[3]
+        self.agent_id = char_a[4]  # Unique agent identifier from warehouse config
         # list of tasks
         self.tasks = tasks
         # int, nb of tasks
