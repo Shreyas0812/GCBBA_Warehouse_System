@@ -5,6 +5,7 @@ import networkx as nx
 import numpy as np
 import time
 from tqdm import tqdm
+from dataclasses import dataclass
 
 from collision_avoidance.grid_map import GridMap
 from collision_avoidance.time_based_collision_avoidance import TimeBasedCollisionAvoidance
@@ -13,6 +14,13 @@ from gcbba.GCBBA_Orchestrator import GCBBA_Orchestrator
 from gcbba.tools_warehouse import agent_init, create_graph_with_range, task_init
 
 from integration.agent_state import AgentState
+
+@dataclass
+class OrchestratorEvents:
+    """Events that can occur during the simulation that the orchestrator needs to handle"""
+    completed_task_ids: List[int]
+    stuck_agent_ids: List[int]
+    gcbba_rerun: bool
 
 class IntegrationOrchestrator:
     """
