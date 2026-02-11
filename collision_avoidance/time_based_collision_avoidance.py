@@ -14,7 +14,12 @@ class TimeBasedCollisionAvoidance:
         self.grid_map = grid_map
         self.reservations = {} # {(x, y, z, t): agent_id}
 
-    def clear_reservations(self):
+    def clear_agent_reservations(self, agent_id):
+        keys_to_remove = [k for k, v in self.reservations.items() if v == agent_id]
+        for k in keys_to_remove:
+            del self.reservations[k]
+            
+    def clear_all_reservations(self):
         """
         Clears all reservations.
         """
@@ -62,7 +67,7 @@ class TimeBasedCollisionAvoidance:
             return True
         return False
     
-    def reserve_path(self, path, agent_id):
+    def reserve_path(self, path, agent_id, start_time=0):
         """
         Reserves the path for the agent.
         
@@ -70,17 +75,17 @@ class TimeBasedCollisionAvoidance:
         :param agent_id: ID of the agent
         """
         for t, pos in enumerate(path):
-            key = (*pos, t)
+            key = (*pos, t + start_time)
             self.reservations[key] = agent_id
 
         # Reserve goal position for all future timesteps 
         if path:
             goal_pos = path[-1]
-            for future_t in range(len(path), len(path) + 1000): # Arbitrary large number to reserve goal
+            for future_t in range(len(path) + start_time, len(path) + start_time + 1000): # Arbitrary large number to reserve goal
                 key = (*goal_pos, future_t)
                 self.reservations[key] = agent_id
     
-    def plan_path_with_reservations(self, start, goal, agent_id, max_time=1000):
+    def plan_path_with_reservations(self, start, goal, agent_id, max_time=1000, start_time=0):
         """
         Path plan with A* search considering time-based reservations.
 
@@ -88,6 +93,7 @@ class TimeBasedCollisionAvoidance:
         :param goal: Goal position (x, y, z)
         :param agent_id: ID of the agent
         :param max_time: Maximum time steps to search
+        :param start_time: Starting time step for planning
         :return: List of positions [(x1, y1, z1), (x2, y2, z2), ...] or None if no path found
         """
 
@@ -99,7 +105,7 @@ class TimeBasedCollisionAvoidance:
         
         # Priority queue for A* search: (f_score, counter, (position, time_step), path)
         counter = 0
-        open_set = [(0, counter, (start, 0), [start])]
+        open_set = [(0, counter, (start, start_time), [start])]
         closed_set = set()
 
         while open_set:

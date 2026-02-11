@@ -106,7 +106,9 @@ class IntegrationOrchestrator:
             nt = len(induct_positions) * self.tasks_per_induct_station
             na = len(agent_positions)
             Lt = int(np.ceil(nt / na))
-        
+        else:
+            Lt = self.Lt
+
         self.gcbba_orchestrator = GCBBA_Orchestrator(G, D, tasks, agents, Lt)
 
     def _init_agent_states(self) -> None:
@@ -118,14 +120,17 @@ class IntegrationOrchestrator:
     def run_simulation(self, timesteps: int = 100) -> None:
         # for _ in tqdm(range(timesteps), desc="Simulation Progress"):
         for _ in range(timesteps):
-            self.step()
+            events = self.step()
             # Main simulation loop logic:
             # 1. Get current task assignments from GCBBA
             # 2. Update AgentState with new assignments
             # 3. Call collision avoidance for path planning/replanning
             # 4. Step simulation forward and update AgentState with new positions and task statuses
             # 5. Trigger GCBBA replanning at specified intervals or when certain conditions are met (e.g. task completion, new tasks added, rerun time etc.)
-            break
+            
+            if len(self.completed_task_ids) == len(self.gcbba_orchestrator.tasks):
+                print(f"All tasks completed at timestep {self.current_timestep}. Ending simulation.")
+                break
     
     def step(self) -> OrchestratorEvents:
         """
@@ -149,7 +154,7 @@ class IntegrationOrchestrator:
         # Check if we need to rerun GCBBA
         events = self._detect_events(completed_task_ids)
 
-        if events.gcbba_rerun:
+        if events.gcbba_rerun and self.last_gcbba_timestep != self.current_timestep:
             self.run_gcbba()
         
         self.current_timestep += 1
@@ -158,11 +163,16 @@ class IntegrationOrchestrator:
     def run_gcbba(self) -> None:
         # clearing previous GCBBA state to ensure fresh planning based on current agent positions and completed tasks
         self.gcbba_orchestrator.initialize_all()
+        self.gcbba_orchestrator.assig_history = []
+        self.gcbba_orchestrator.bid_history = []
+        self.gcbba_orchestrator.max_times = []
+        self.gcbba_orchestrator.cvg_iter = self.gcbba_orchestrator.nt
 
         if self.current_timestep > 0:
             for i, agent_state in enumerate(self.agent_states):
                 predicted_pos = agent_state.get_predicted_position(self.prediction_horizon)
-                self.gcbba_orchestrator.agents[i].pos = predicted_pos
+                continuous_pos = self.grid_map.grid_to_continuous(*predicted_pos)
+                self.gcbba_orchestrator.agents[i].pos = continuous_pos
 
         assignment, total_score, makespan = self.gcbba_orchestrator.launch_agents()
 
@@ -211,11 +221,12 @@ class IntegrationOrchestrator:
             return
 
         for agent_state in replan_agents:
+            self.ca.clear_agent_reservations(agent_state.agent_id)
             goal = agent_state.get_current_goal()
 
             if goal is None:
                 start = agent_state.get_position()
-                self.ca.reserve_path([start], agent_state.agent_id)
+                self.ca.reserve_path([start], agent_state.agent_id, start_time=self.current_timestep)
                 continue
 
             start = agent_state.get_position()
@@ -223,14 +234,15 @@ class IntegrationOrchestrator:
                 start=start,
                 goal=goal,
                 agent_id=agent_state.agent_id,
-                max_time=self.max_plan_time
+                max_time=self.max_plan_time,
+                start_time=self.current_timestep
             )
 
             if path is None:
                 path = [start]  # No path found, stay in place
             
             agent_state.assign_path(path)
-            self.ca.reserve_path(path, agent_state.agent_id)
+            self.ca.reserve_path(path, agent_state.agent_id, start_time=self.current_timestep)
 
     def _detect_events(self, completed_task_ids: List[int]) -> OrchestratorEvents:
         stuck_agent_ids: List[int] = []
@@ -243,6 +255,10 @@ class IntegrationOrchestrator:
         gcbba_rerun = False
         if completed_task_ids or stuck_agent_ids:
             gcbba_rerun = True  # Trigger GCBBA rerun if any tasks completed or agents stuck
+
+        # Also trigger GCBBA rerun at regular intervals
+        if (self.current_timestep - self.last_gcbba_timestep) >= self.rerun_interval:
+            gcbba_rerun = True
 
         return OrchestratorEvents(
             completed_task_ids=completed_task_ids,

@@ -72,8 +72,14 @@ class AgentState:
         """
         self.current_timestep = current_timestep
 
+        executing_task_id = self.current_task.task_id if self.current_task else None
+
         new_planned_tasks = []
         for task in assigned_tasks:
+            if task['task_id'] == executing_task_id:
+                # Skip already executing task
+                continue
+            
             task_info = TaskExecutionInfo(
                 task_id=task['task_id'],
                 induct_pos=self._to_grid_pos(task['induct_pos']),
