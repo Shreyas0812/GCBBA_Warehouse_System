@@ -166,6 +166,7 @@ class IntegrationOrchestrator:
 
         if events.gcbba_rerun and self.last_gcbba_timestep != self.current_timestep:
             self.run_gcbba()
+            self._plan_paths()  # Replan paths immediately after GCBBA to reflect new assignments
         
         self.current_timestep += 1
         return events
@@ -358,7 +359,7 @@ if __name__ == "__main__":
     orchestrator = IntegrationOrchestrator(config_path)
 
     t0 = time.time()
-    orchestrator.run_simulation()
+    orchestrator.run_simulation(timesteps=200)
     tf = time.time()
 
     print(f"Simulation completed in {tf - t0} seconds.")
