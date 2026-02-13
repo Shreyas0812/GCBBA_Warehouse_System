@@ -117,6 +117,8 @@ class IntegrationOrchestrator:
 
         self.gcbba_orchestrator = GCBBA_Orchestrator(G, D, tasks, agents, Lt)
 
+        print(f"Orchestrator initialized with {self.num_agents} agents and {len(self.all_task_ids)} tasks.")
+
     def _init_agent_states(self) -> None:
         self.agent_states: List[AgentState] = []
         for idx, gcbba_agent in enumerate(self.gcbba_orchestrator.agents):
@@ -124,9 +126,12 @@ class IntegrationOrchestrator:
             self.agent_states.append(AgentState(agent_id=gcbba_agent.id, initial_position=grid_pos, speed=gcbba_agent.speed))
 
     def run_simulation(self, timesteps: int = 100) -> None:
-        # for _ in tqdm(range(timesteps), desc="Simulation Progress"):
-        for _ in range(timesteps):
+        pbar = tqdm(range(timesteps), desc="Simulation", leave=True)
+        for _ in pbar:
             events = self.step()
+            done = len(self.completed_task_ids)
+            total = len(self.all_task_ids)
+            pbar.set_postfix(done=f"{done}/{total}", t=self.current_timestep, refresh=False)
             # Main simulation loop logic:
             # 1. Get current task assignments from GCBBA
             # 2. Update AgentState with new assignments
@@ -135,7 +140,7 @@ class IntegrationOrchestrator:
             # 5. Trigger GCBBA replanning at specified intervals or when certain conditions are met (e.g. task completion, new tasks added, rerun time etc.)
             
             if self.completed_task_ids == self.all_task_ids:
-                print(f"All tasks completed at timestep {self.current_timestep}. Ending simulation.")
+                tqdm.write(f"All tasks completed at timestep {self.current_timestep}. Ending simulation.")
                 break
     
     def step(self) -> OrchestratorEvents:
@@ -191,7 +196,7 @@ class IntegrationOrchestrator:
                 agent_state.update_from_gcbba([], self.current_timestep)
             self.latest_assignment = [[] for _ in range(self.num_agents)]
             self.last_gcbba_timestep = self.current_timestep
-            print(f"No active tasks to allocate at timestep {self.current_timestep}. Skipping GCBBA run.")
+            tqdm.write(f"No active tasks to allocate at timestep {self.current_timestep}. Skipping GCBBA run.")
             return
         
         # Build updated char_a for agents based on their current positions and speeds
@@ -237,9 +242,9 @@ class IntegrationOrchestrator:
         gcbba_orch = GCBBA_Orchestrator(G, D, active_char_t, updated_char_a, Lt, task_ids=active_task_ids)
         assignment, total_score, makespan = gcbba_orch.launch_agents()
 
-        print(f"[t={self.current_timestep}] GCBBA: {nt_active} active tasks, "
-              f"{len(excluded_task_ids)} excluded ({len(self.completed_task_ids)} done, "
-              f"{len(executing_task_ids)} executing). Score={total_score:.2f}, Makespan={makespan:.2f}")
+        tqdm.write(f"[t={self.current_timestep}] GCBBA: {nt_active} active tasks, "
+                  f"{len(excluded_task_ids)} excluded ({len(self.completed_task_ids)} done, "
+                  f"{len(executing_task_ids)} executing). Score={total_score:.2f}, Makespan={makespan:.2f}")
         
         self.latest_assignment = assignment
         

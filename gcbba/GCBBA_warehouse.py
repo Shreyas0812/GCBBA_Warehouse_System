@@ -85,7 +85,7 @@ if __name__ == "__main__":
     tf0 = np.round(1000 * (time.time() - t0))
 
 
-    print("GCBBA - total score. = {}; max score = {}; time = {} ms; assignment = {}".format(tot_score, makespan, tf0, assig))
+    # print("GCBBA - total score. = {}; max score = {}; time = {} ms; assignment = {}".format(tot_score, makespan, tf0, assig))
 
     
 

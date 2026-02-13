@@ -38,7 +38,6 @@ class GCBBA_Orchestrator:
         
         # initialize tasks and agents
         self.initialize_all()
-        print("Orchestrator initialized with {} agents and {} tasks.".format(self.na, self.nt))
         self.bid_history = []
         self.assig_history = []
         self.max_times = []
@@ -77,7 +76,7 @@ class GCBBA_Orchestrator:
         nb_iter = Nmin # number of main iterations
         nb_cons = 2*D  # number of consensus rounds per iteration
 
-        for iter in tqdm(range(nb_iter)):
+        for iter in range(nb_iter):
             for i in range(self.na):
                 # Bundle creation phase
                 if self.agents[i].converged == False:
@@ -104,7 +103,6 @@ class GCBBA_Orchestrator:
             all_converged = np.all([agent.converged for agent in self.agents])
             if all_converged and self.cvg_iter == self.nt:
                 self.cvg_iter = iter + 1
-                print("All agents converged at iteration {}".format(self.cvg_iter))
                 break
 
             # if not np.all([agent.converged for agent in self.agents]):
