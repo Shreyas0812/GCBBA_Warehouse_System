@@ -40,7 +40,7 @@ class IntegrationOrchestrator:
                  comm_range: float = 30,
                  sp_lim: Tuple[float, float] = (1.0, 5.0),
                  rerun_interval: int = 10,
-                 stuck_threshold: int = 5,
+                 stuck_threshold: int = 15,
                  prediction_horizon: int = 5,
                  max_plan_time: int = 400,
                  Lt: Optional[int] = None
