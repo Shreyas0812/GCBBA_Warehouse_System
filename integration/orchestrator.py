@@ -301,6 +301,7 @@ class IntegrationOrchestrator:
             if goal is None:
                 start = agent_state.get_position()
                 self.ca.reserve_path([start], agent_state.agent_id, start_time=self.current_timestep)
+                agent_state.needs_new_path = False
                 continue
 
             start = agent_state.get_position()
