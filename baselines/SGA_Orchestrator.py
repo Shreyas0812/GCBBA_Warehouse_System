@@ -12,6 +12,7 @@ Interface matches GCBBA_Orchestrator for drop-in replacement.
 
 import time
 import numpy as np
+import networkx as nx
 
 from gcbba.GCBBA_Task import GCBBA_Task
 
@@ -66,3 +67,40 @@ class SGA_Orchestrator:
         self.assig_history = []
         self.bid_history = []
         self.max_times = []
+
+    def launch_agents(self, method=None, detector=None):
+        """
+        Running SGA allocation
+        """
+        G_nx = nx.from_numpy_array(self.G)
+        components = list(nx.connected_components(G_nx))
+
+        agent_paths = [[] for _ in range(self.na)]
+
+        if len(components) == 1:
+            # Single connected component: run SGA on all agents and tasks
+            agent_indices = list(range(self.na))
+            task_indices = list(self.task_ids)
+            self._run_sga(agent_indices, task_indices, agent_paths)
+        else:
+            # Multiple connected components: run SGA independently on each component
+            # Each component gets access to all tasks (generous to baseline)
+            for component in components:
+                agent_indices = sorted(list(component))
+                task_indices = list(self.task_ids)
+                self._run_sga(agent_indices, task_indices, agent_paths)
+
+        assignment = []
+        for i in range(self.na):
+            assignment.append(list(agent_paths[i]))
+        
+        self.assig_history.append(assignment)
+
+        return assignment, None, None  # Placeholder for assignment, total score, and makespan
+    
+    def _run_sga(self, agent_indices, task_indices, agent_paths):
+        """
+        Core SGA loop: sequentially assign (agent, task) pairs with highest
+        marginal gain until no positive bids remain or capacity is reached.
+        """
+        print(f"Running SGA on agents {agent_indices} and tasks {task_indices}")
