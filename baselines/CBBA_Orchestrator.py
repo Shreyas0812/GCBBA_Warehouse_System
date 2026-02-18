@@ -95,3 +95,23 @@ class CBBA_Orchestrator:
             return self.assig_history[-1], self.bid_history[-1], self.max_times[-1]
         else:
             return [], 0, 0
+        
+    def gather_info(self):
+        """
+        Gather assignment, bid, and max_time information from all agents.
+        """
+        assignment = []
+        bid = 0
+        max_time = 0
+
+        for agent in self.agents:
+            a_time = agent.evaluate_path(agent.p)
+            a_time = -a_time
+
+            if a_time > max_time:
+                max_time = a_time
+            
+            bid_sum += a_time
+            assignment.append(agent.p)
+
+        return assignment, np.round(bid_sum, 2), max_time
