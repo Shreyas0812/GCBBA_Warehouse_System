@@ -176,13 +176,73 @@ class SGA_Orchestrator:
             # and compute the resulting score S_i(p_i ⊕_opt j)
 
             # For now, we return dummy values as a placeholder.
-            score_with_insertion = -np.random.rand()  # Replace with actual score calculation
+            candidate_path = list(agent_path)
+            candidate_path.insert(pos, task.id)  # Insert task ID at position pos
+            score = self._evaluate_path(agent_idx, candidate_path)
 
-            if score_with_insertion > best_score:
-                best_score = score_with_insertion
+            if score > best_score:
+                best_score = score
                 best_pos = pos
 
         return best_score, best_pos
+
+    def _evaluate_path(self, agent_idx, path):
+        """
+        Evaluate the score of a given path for an agent based on the chosen metric.
+        For RPT, this would be negative total completion time.
+
+        This is a placeholder function and should be implemented based on the specific metric and task characteristics.
+        """
+        cur_pos = self.agent_pos[agent_idx]
+        cur_pos_grid = self.agent_pos_grid[agent_idx]
+        speed = self.agent_speed[agent_idx]
+        score = 0
+        travel_time = 0
+
+        for task_id in path:
+            task = self._get_task_by_id(task_id)
+            # Compute travel time from current position to task's induct station
+            travel_time += self._get_distance(cur_pos, cur_pos_grid, task.induct_pos, task.induct_grid) / speed
+            
+            # Induct to eject time (task duration)
+            travel_time += self._get_distance(task.induct_pos, task.induct_grid, task.eject_pos, task.eject_grid) / speed
+            
+            score -= travel_time  # RPT metric is negative total completion time
+            
+            travel_time = 0 # Reset travel time for next task (RPT)
+
+            cur_pos = task.eject_pos
+            cur_pos_grid = task.eject_grid
+
+        return score
+    
+    def _get_task_by_id(self, task_id):
+        """Look up task object by its ID."""
+        for task in self.tasks:
+            if task.id == task_id:
+                return task
+        raise ValueError(f"Task ID {task_id} not found")
+    
+    def _get_distance(self, pos, pos_grid, target_pos, target_grid):
+        """
+        Get distance between two positions using BFS lookup (mirrors GCBBA_Agent._get_distance).
+        """
+        if self.grid_map is None or pos_grid is None or target_grid is None:
+            return np.linalg.norm(np.array(pos) - np.array(target_pos))
+
+        # BFS from target (target is station)
+        table = self.grid_map.bfs_distances_from_station.get(target_grid)
+        if table is not None and pos_grid in table:
+            return table[pos_grid]
+
+        # BFS from pos (pos is station)
+        table = self.grid_map.bfs_distances_from_station.get(pos_grid)
+        if table is not None and target_grid in table:
+            return table[target_grid]
+
+        # Fallback to Euclidean
+        return np.linalg.norm(np.array(pos) - np.array(target_pos))
+    
 
 if __name__ == "__main__":
     import yaml
