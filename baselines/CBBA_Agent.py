@@ -78,3 +78,115 @@ class CBBA_Agent(GCBBA_Agent):
             self.y[best_bid_idx] = self.c[best_bid_idx]
             self.z[best_bid_idx] = self.id
     
+    def resolve_conflicts(self, all_agents, consensus_iter=0, consensus_index_last=False):
+        """
+        CBBA does not do convergence detection, so just do 1 round of conflict resolution after bundle building.
+
+        Logic remains the same, but there is no convergence detection 
+        """
+        neigh_indxs = np.argwhere(self.G[self.id, :] == 1).flatten()
+        neigh_indxs = neigh_indxs[neigh_indxs != self.id]  # Exclude self
+
+        for k in neigh_indxs:
+            neigh = all_agents[k]
+            for j in range(self.nt):
+
+                task_id = self.tasks[j].id
+
+                # agent k thinks it won task j
+                if neigh.z[j] == neigh.id:
+                    # agent i (self) thinks it won task j 
+                    if self.z[j] == self.id:
+                        if neigh.y[j] > self.y[j] or (neigh.y[j] == self.y[j] and neigh.id < self.id):
+                            self.update(neigh, task_id)
+                    # agent i (self) thinks k won task j
+                    elif self.z[j] == k:
+                        self.update(neigh, task_id)
+                    # agent i (self) thinks nobody won task j
+                    elif self.z[j] is None:
+                        self.update(neigh, task_id)
+                    # agent j thinks some other agent m won task j
+                    else:
+                        m = int(self.z[j])
+                        if neigh.s[m] > self.s[m] or neigh.y[j] > self.y[j] or (neigh.y[j] == self.y[j] and neigh.id < self.id):
+                            self.update(neigh, task_id)
+
+                # agent k thinks agent i (self) won task j
+                elif neigh.z[j] == self.id:
+                    # agent i (self) also thinks agent i (self) won task j
+                    if self.z[j] == self.id:
+                        self.leave()
+                    # agent i (self) thinks k won task j
+                    elif self.z[j] == k:
+                        self.reset(task_id)
+                    # agent i (self) thinks nobody won task j
+                    elif self.z[j] is None:
+                        self.leave()
+                    # agent i (self) thinks some other agent m won task j
+                    else:
+                        m = int(self.z[j])
+                        # update if neighbor has more recent info
+                        if neigh.s[m] > self.s[m]:
+                            self.reset(task_id)
+                
+                # agent k thinks nobody won task j
+                elif neigh.z[j] is None:
+                    # agent i (self) thinks it won task j
+                    if self.z[j] == self.id:
+                        self.leave()
+                    # agent i (self) thinks k won task j
+                    elif self.z[j] == k:
+                        self.update(neigh, task_id)
+                    # agent i (self) thinks nobody won task j
+                    elif self.z[j] is None:
+                        self.leave()
+                    # agent i (self) thinks some other agent m won task j
+                    else:
+                        m = int(self.z[j])
+                        if neigh.s[m] > self.s[m]:
+                            self.reset(task_id)
+
+                # agent k thinks agent some other agent m won task j
+                else:
+                    m = int(neigh.z[j])
+                    # agent i (self) thinks it won task j
+                    if self.z[j] == self.id:
+                        if (neigh.s[m] > self.s[m] and neigh.y[j] > self.y[j]) or (neigh.s[m] > self.s[m] and neigh.y[j] == self.y[j] and neigh.id < self.id):
+                            self.update(neigh, task_id)
+                    # agent i (self) thinks k won task j
+                    elif self.z[j] == k:
+                        if neigh.s[m] > self.s[m]:
+                            self.update(neigh, task_id)
+                        else:
+                            self.reset(task_id)
+                    # agent i (self) thinks m won task j
+                    elif self.z[j] == m:
+                        if neigh.s[m] > self.s[m]:
+                            self.update(neigh, task_id)
+                    # agent i (self) thinks nobody won task j
+                    elif self.z[j] is None:
+                        if neigh.s[m] > self.s[m]:
+                            self.update(neigh, task_id)
+                    else:
+                        n = int(self.z[j])
+                        if neigh.s[m] > self.s[m] and neigh.s[n] > self.s[n]:
+                            self.update(neigh, task_id)
+                        elif (neigh.s[m] > self.s[m] and neigh.y[j] > self.y[j]) or (neigh.s[m] > self.s[m] and neigh.y[j] == self.y[j] and neigh.id < self.id):
+                            self.update(neigh, task_id)
+                        elif neigh.s[n] > self.s[n] and self.s[m] > neigh.s[m]:
+                            self.reset(task_id)
+        
+        self.compute_s(neigh, consensus_iter)
+
+    def snapshot(self):
+        """
+        Snapshot for consesus sharing
+        """
+        snap = object.__new__(CBBA_Agent)
+        snap.id = self.id
+        snap.y = self.y[:]
+        snap.z = self.z[:]
+        snap.s = self.s[:]
+
+        snap.their_net_cvg = []
+        return snap
