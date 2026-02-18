@@ -80,11 +80,10 @@ class SGA_Orchestrator:
         if len(components) == 1:
             # Single connected component: run SGA on all agents and tasks
             agent_indices = list(range(self.na))
-            task_indices = list(self.task_ids)
+            task_indices = list(range(self.nt))  # Use task indices 0..nt-1
             self._run_sga(agent_indices, task_indices, agent_paths)
         else:
-
-            remaining_task_indices = set(self.task_ids)
+            remaining_task_indices = set(range(self.nt))  # Use task indices
             # Multiple connected components: run SGA independently on each component
             # Each component gets access to all tasks (generous to baseline)
             for component in components:
@@ -106,6 +105,14 @@ class SGA_Orchestrator:
         """
         Core SGA loop: sequentially assign (agent, task) pairs with highest
         marginal gain until no positive bids remain or capacity is reached.
+        
+        Args:
+            agent_indices: List of agent indices to consider
+            task_indices: List of task indices (0..nt-1) to allocate
+            agent_paths: List of current agent paths (modified in place)
+        
+        Returns:
+            Set of task indices that were assigned
         """
         available_tasks = set(task_indices)
         assigned_tasks = set()
@@ -118,7 +125,7 @@ class SGA_Orchestrator:
 
             best_bid = -float('inf')
             best_agent = None
-            best_task_id = None
+            best_task_idx = None
             best_insert_pos = None
 
             # Evaluate all (agent, task) pairs to find the best bid
@@ -126,14 +133,14 @@ class SGA_Orchestrator:
                 if len(agent_paths[i]) >= self.Lt:
                     continue  # Skip if agent has reached capacity
 
-                for task_id in available_tasks:
-                    task = self.tasks[task_id]
+                for task_idx in available_tasks:
+                    task = self.tasks[task_idx]  # task_idx is 0..nt-1
                     bid, insert_pos = self._compute_marginal_gain(i, agent_paths[i], task)
 
                     if bid > best_bid or (bid == best_bid and best_agent is not None and i < best_agent):
                         best_bid = bid
                         best_agent = i
-                        best_task_id = task_id
+                        best_task_idx = task_idx
                         best_insert_pos = insert_pos   
             
             # No positive bids remain, stop allocation
@@ -141,19 +148,41 @@ class SGA_Orchestrator:
                 break
                 
             # Assign the best task to the best agent
-            task_id = self.tasks[best_task_id].id
+            # Store the actual task ID in the agent's path
+            task_id = self.tasks[best_task_idx].id
             agent_paths[best_agent].insert(best_insert_pos, task_id)
-            available_tasks.remove(best_task_id)
-            assigned_tasks.add(best_task_id)
+            available_tasks.remove(best_task_idx)
+            assigned_tasks.add(best_task_idx)
 
         return assigned_tasks
     
     def _compute_marginal_gain(self, agent_idx, agent_path, task):
         """
-        Compute marginal gain of assigning a task to an agent.
+        Compute marginal gain of assigning a task to an agent i.e inserting a task at the optimal position in the agent's path.
+
+        c_ij(p_i) = S_i(p_i ⊕_opt j) - S_i(p_i)
+
+        For RPT, S_i is negative total completion time, so marginal gain is
+        the best (least negative) score after insertion minus current score.
+
         """
         # Placeholder for marginal gain computation
-        return 0.0, 0  # Return dummy values
+        
+        best_score = -float('inf')
+        best_pos = 0
+
+        for pos in range(len(agent_path) + 1):
+            # Simulate inserting the task at position pis in the agent's path
+            # and compute the resulting score S_i(p_i ⊕_opt j)
+
+            # For now, we return dummy values as a placeholder.
+            score_with_insertion = -np.random.rand()  # Replace with actual score calculation
+
+            if score_with_insertion > best_score:
+                best_score = score_with_insertion
+                best_pos = pos
+
+        return best_score, best_pos
 
 if __name__ == "__main__":
     import yaml
