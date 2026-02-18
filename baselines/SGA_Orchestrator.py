@@ -166,18 +166,24 @@ class SGA_Orchestrator:
 
         For RPT, S_i is negative total completion time, so marginal gain is
         the best (least negative) score after insertion minus current score.
-
+        
+        Args:
+            agent_idx: Index of the agent
+            agent_path: Current path of the agent (list of task IDs)
+            task: Task object to potentially insert
+        
+        Returns:
+            Tuple of (marginal_gain, best_position)
         """
-        # Placeholder for marginal gain computation
+        # Get current path score
+        current_score = self._evaluate_path(agent_idx, agent_path)
         
         best_score = -float('inf')
         best_pos = 0
 
         for pos in range(len(agent_path) + 1):
-            # Simulate inserting the task at position pis in the agent's path
+            # Simulate inserting the task at position pos in the agent's path
             # and compute the resulting score S_i(p_i ⊕_opt j)
-
-            # For now, we return dummy values as a placeholder.
             candidate_path = list(agent_path)
             candidate_path.insert(pos, task.id)  # Insert task ID at position pos
             score = self._evaluate_path(agent_idx, candidate_path)
@@ -186,7 +192,10 @@ class SGA_Orchestrator:
                 best_score = score
                 best_pos = pos
 
-        return best_score, best_pos
+        # Marginal gain is the change in score
+        marginal_gain = best_score - current_score
+        
+        return marginal_gain, best_pos
 
     def _evaluate_path(self, agent_idx, path):
         """
