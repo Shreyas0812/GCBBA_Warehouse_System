@@ -55,9 +55,14 @@ class IntegrationOrchestrator:
                  stuck_threshold: int = 15,
                  prediction_horizon: int = 5,
                  max_plan_time: int = 400,
-                 Lt: Optional[int] = None
+                 Lt: Optional[int] = None,
+                 allocation_method: str = "gcbba"  # "gcbba", "sga", or "cbba"
                  ) -> None:
         
+        if allocation_method not in {"gcbba", "sga", "cbba"}:
+            raise ValueError(f"Invalid allocation method: {allocation_method}. Must be one of 'gcbba', 'sga', or 'cbba'.")
+
+        self.allocation_method = allocation_method
         self.tasks_per_induct_station = tasks_per_induct_station
         self.comm_range = comm_range
         self.sp_lim = sp_lim
@@ -71,7 +76,7 @@ class IntegrationOrchestrator:
         self.ca = TimeBasedCollisionAvoidance(self.grid_map)
 
         agent_positions, induct_positions, eject_positions = self._load_config(config_path)
-        self._init_gcbba(agent_positions, induct_positions, eject_positions)
+        self._init_allocation(agent_positions, induct_positions, eject_positions)
         self._init_agent_states()
 
         # Simulation state variables
@@ -102,7 +107,10 @@ class IntegrationOrchestrator:
 
         return agent_positions, induct_positions, eject_positions
 
-    def _init_gcbba(self, agent_positions: List, induct_positions: List, eject_positions: List) -> None:
+    def _init_allocation(self, agent_positions: List, induct_positions: List, eject_positions: List) -> None:
+        """
+        Initialize the chosen allocation orchestrator (GCBBA, SGA, or CBBA) with the given configuration.
+        """
         raw_graph, G = create_graph_with_range(agent_positions, self.comm_range)
         if raw_graph.number_of_nodes() == 0:
             D = 1
@@ -128,18 +136,19 @@ class IntegrationOrchestrator:
         self.all_char_a = agents   # List[np.array], indexed by agent index
         self.num_agents = len(agents)
 
-        self.gcbba_orchestrator = GCBBA_Orchestrator(G, D, tasks, agents, Lt)
+        # Initialize using GCBBA -- all methods share same agent and task initialization, so we can use the same parameters to create the orchestrator instance and then call the appropriate launch method
+        self.gcbba_orchestrator_initial = GCBBA_Orchestrator(G, D, tasks, agents, Lt)
 
         print(f"Orchestrator initialized with {self.num_agents} agents and {len(self.all_task_ids)} tasks.")
 
     def _init_agent_states(self) -> None:
         self.agent_states: List[AgentState] = []
-        for idx, gcbba_agent in enumerate(self.gcbba_orchestrator.agents):
+        for idx, gcbba_agent in enumerate(self.gcbba_orchestrator_initial.agents):
             grid_pos = self.grid_map.continuous_to_grid(float(gcbba_agent.pos[0]), float(gcbba_agent.pos[1]), float(gcbba_agent.pos[2]))
             self.agent_states.append(AgentState(agent_id=gcbba_agent.id, initial_position=grid_pos, speed=gcbba_agent.speed))
 
     def run_simulation(self, timesteps: int = 100) -> None:
-        pbar = tqdm(range(timesteps), desc="Simulation", leave=True)
+        pbar = tqdm(range(timesteps), desc=f"Simulation ({self.allocation_method.upper()})", leave=True)
         for _ in pbar:
             events = self.step()
             done = len(self.completed_task_ids)
@@ -161,7 +170,7 @@ class IntegrationOrchestrator:
         Step the simulation forward by one timestep.
         """
         if self.current_timestep == 0 or self.last_gcbba_timestep < 0:
-            self.run_gcbba()
+            self.run_allocation()
             self._plan_paths()
 
         completed_task_ids: List[int] = []
@@ -180,13 +189,16 @@ class IntegrationOrchestrator:
         events = self._detect_events(completed_task_ids)
 
         if events.gcbba_rerun and self.last_gcbba_timestep != self.current_timestep:
-            self.run_gcbba()
+            self.run_allocation()
             self._plan_paths()  # Replan paths immediately after GCBBA to reflect new assignments
         
         self.current_timestep += 1
         return events
 
-    def run_gcbba(self) -> None:
+    def run_allocation(self) -> None:
+        """
+        Run the chosen allocation method: GCBBA, SGA, or CBBA.
+        """
         
         # Tasks to Exclude: completed tasks + currently executing tasks (to avoid reassigning them)
         executing_task_ids = self._get_executing_task_ids()
@@ -248,13 +260,33 @@ class IntegrationOrchestrator:
         else:
             Lt = self.Lt
         
-        # Fresh GCBBBA Orchestrator instance with updated parameters and state
-        gcbba_orch = GCBBA_Orchestrator(G, D, active_char_t, updated_char_a, Lt, task_ids=active_task_ids, grid_map=self.grid_map)
-        assignment, total_score, makespan = gcbba_orch.launch_agents()
+        # Dispatch to the appropriate orchestrator based on the chosen allocation method
+        t_allocation_start = time.perf_counter()
 
-        tqdm.write(f"[t={self.current_timestep}] GCBBA: {nt_active} active tasks, "
-                  f"{len(excluded_task_ids)} excluded ({len(self.completed_task_ids)} done, "
-                  f"{len(executing_task_ids)} executing). Score={total_score:.2f}, Makespan={makespan:.2f}")
+        if self.allocation_method == "gcbba":
+            # Fresh GCBBBA Orchestrator instance with updated parameters and state
+            allocator = GCBBA_Orchestrator(G, D, active_char_t, updated_char_a, Lt, task_ids=active_task_ids, grid_map=self.grid_map)
+        
+        elif self.allocation_method == "sga":
+            allocator = SGA_Orchestrator(G, D, active_char_t, updated_char_a, Lt, task_ids=active_task_ids, grid_map=self.grid_map)
+        
+        elif self.allocation_method == "cbba":
+            allocator = CBBA_Orchestrator(G, D, active_char_t, updated_char_a, Lt, task_ids=active_task_ids, grid_map=self.grid_map)
+        
+        assignment, total_score, makespan = allocator.launch_agents()
+
+        t_allocation_end = time.perf_counter()
+
+        allocation_time_ms = (t_allocation_end - t_allocation_start) * 1000
+
+        tqdm.write(
+            f"[t={self.current_timestep}] {self.allocation_method.upper()}: "
+            f"{nt_active} active tasks, "
+            f"{len(excluded_task_ids)} excluded "
+            f"({len(self.completed_task_ids)} done, "
+            f"{len(executing_task_ids)} executing). "
+            f"Score={total_score:.2f}, Makespan={makespan:.2f}, Time={allocation_time_ms:.2f}ms"
+        )
         
         self.latest_assignment = assignment
         
