@@ -114,6 +114,6 @@ class CBBA_Orchestrator:
                 max_time = a_time
             
             bid_sum += a_time
-            assignment.append(agent.p)
+            assignment.append(list(agent.p))  # Create a copy to avoid mutation issues
 
-        return assignment, np.round(bid_sum, 2), max_time
+        return assignment, np.round(bid_sum, 6), max_time

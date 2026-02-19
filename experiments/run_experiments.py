@@ -74,10 +74,10 @@ def run_single_experiment(config_path, allocation_method, comm_range, tasks_per_
 
         # Run the simulation
         t_start = time.time()
-        orchestrator.run_simulation(timesteps=MAX_TIMESTEPS)
+        orchestrator.run_simulation(timesteps=max_timesteps)
         t_end = time.time()
 
-        completed = len(orchestrator.completed_tasks)
+        completed = len(orchestrator.completed_task_ids)
         completion_rate = completed / total_tasks if total_tasks > 0 else 0
         wall_time = t_end - t_start
         final_timestep = orchestrator.current_timestep
@@ -194,7 +194,7 @@ if __name__ == "__main__":
         else:
             print(f"  ✓ {result['completed_tasks']}/{result['total_tasks']} tasks "
                 f"({result['completion_rate']*100:.1f}%) in {result['final_timestep']} steps, "
-                f"{result['wall_time_s']}s wall time")
+                f"{result['wall_time_sec']:.1f}s wall time")
             
         # Save results after each experiment to avoid data loss
         save_results_to_csv(results, output_path)
