@@ -1,3 +1,12 @@
+"""
+Integration Orchestrator for Multi-Agent Task Allocation and Path Planning
+- "gcbba" (default): GCBBA with ADD bundle building + global consensus
+- "sga": Centralized Sequential Greedy Algorithm
+- "cbba": Standard CBBA with FULLBUNDLE + local consensus
+
+Path Planner: Priority-based Time-Expanded A* with reservation table for collision avoidance
+"""
+
 import os
 import csv
 from typing import Optional, Set, Tuple, List, Dict
@@ -12,6 +21,9 @@ from collision_avoidance.grid_map import GridMap
 from collision_avoidance.time_based_collision_avoidance import TimeBasedCollisionAvoidance
 
 from gcbba.GCBBA_Orchestrator import GCBBA_Orchestrator
+from baselines.SGA_Orchestrator import SGA_Orchestrator
+from baselines.CBBA_Orchestrator import CBBA_Orchestrator
+
 from gcbba.tools_warehouse import agent_init, create_graph_with_range, task_init
 
 from integration.agent_state import AgentState
@@ -25,9 +37,9 @@ class OrchestratorEvents:
 
 class IntegrationOrchestrator:
     """
-    Main Integration Orchestrator
+    Main Integration Orchestrator - supports GCBBA, SGA and CBBA allocation
 
-    - Run GCBBA to get task assignments
+    - Run allocation to get task assignments
     - Assignments are sent to AgentState for execution
     - Collision Avoidance called for Path Planning and Replanning
     - Step simulation forward and update AgentState with new positions and task statuses
