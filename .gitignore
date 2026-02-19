@@ -40,4 +40,5 @@ results/experiments/
 results/plots/
 
 # Temporary - exclude experiment scripts
-experiments/plot_results.py
+experiments/run_experiments*
+experiments/plot_results*
