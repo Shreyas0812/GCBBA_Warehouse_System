@@ -38,7 +38,7 @@ class AgentState:
      - Provides methods to update execution state and retrieve current task info
     """
 
-    def __init__(self, agent_id: int, initial_position: Tuple[int, int, int], speed: float = 1.0):
+    def __init__(self, agent_id: int, initial_position: Tuple[int, int, int], speed: float = 1.0, max_energy: int = 100):
         self.agent_id = agent_id
         self.pos = np.array(initial_position, dtype=np.int32)
         self.speed = speed
@@ -61,6 +61,13 @@ class AgentState:
         self.position_history: List[Tuple[int, int, int, int]] = [
             (initial_position[0], initial_position[1], initial_position[2], 0)
         ]
+
+        # energy management
+        self.max_energy:int = max_energy
+        self.energy:int = max_energy
+        self.is_charging: bool = False
+        self.charge_remaining: int = 0 # timesteps remaining to finish charging when at a charging station
+        self.charging_station_pos: Optional[Tuple[int, int, int]] = None # For now the position of the nearest induct station, can be updated to track actual charging stations if different
 
         self.current_timestep: int = 0
 
@@ -304,3 +311,50 @@ class AgentState:
         if len(pos_list) != 3:
             raise ValueError(f"Expected 3D position, got {len(pos_list)} values")
         return (int(pos_list[0]), int(pos_list[1]), int(pos_list[2]))
+    
+
+    #################### Energy Management Methods ####################
+    def deplete_energy(self, amount: int = 1) -> None:
+        """
+        Deplete the agent's energy by a specified amount, default is 1 unit per step when executing a task. Energy does not deplete when idle or charging.
+        """
+        if not self.is_charging:
+            self.energy = max(0, self.energy - amount)
+
+    def start_charging(self, charging_station_pos: Tuple[int, int, int], charge_duration: int = 30) -> None:
+        """
+        Start charging the agent at a charging station. Sets the is_charging flag and initializes charge_remaining.
+        """
+        self.is_charging = True
+        self.charge_remaining = charge_duration
+        self.charging_station_pos = charging_station_pos
+
+        # Drop all planned tasks
+        self.planned_tasks = []
+        self.is_idle = True
+
+    def step_charging(self, charge_per_timestep: int = 1) -> bool:
+        """
+        Progress one timestep of charging. Decrements charge_remaining and updates energy. If charging is complete, resets charging state.
+        """
+
+        if not self.is_charging:
+            return False
+        
+        # For simplicity, we assume a fixed charge rate and that the agent will be fully charged after charge_duration timesteps. In a more complex model, we could increment energy each timestep and check for max_energy.
+        # self.energy = min(self.max_energy, self.energy + charge_per_timestep)
+        self.charge_remaining -= 1
+        if self.charge_remaining <= 0:
+            self.is_charging = False
+            self.energy = self.max_energy
+            self.charging_station_pos = None
+            return True
+        
+        return False
+    
+    def needs_charging(self, nearest_charging_station_distance: int) -> bool:
+        """
+        Agent needs to have enough energy to reach the nearest charging station
+        """
+        threshold = int(nearest_charging_station_distance * 1.2) # Add some buffer to ensure agent doesn't run out of energy before reaching station
+        return self.energy <= threshold
