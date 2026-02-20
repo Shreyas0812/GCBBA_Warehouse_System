@@ -374,12 +374,13 @@ class AgentState:
         if not self.is_charging:
             self.energy = max(0, self.energy - amount)
 
-    def start_charging(self, charging_station_pos: Tuple[int, int, int], charge_duration: int = 6) -> None:
+    def start_charging(self, charging_station_pos: Tuple[int, int, int], charge_duration: int = 20) -> None:
         """
-        Start charging the agent at a charging station. Sets the is_charging flag and initializes charge_remaining.
+        Initiate navigation to a charging station. Sets is_navigating_to_charger so the agent
+        travels to the station first; is_charging is set to True only upon arrival (in step()).
         """
-        self.is_charging = True
-        self.is_navigating_to_charger = False
+        self.is_navigating_to_charger = True
+        self.is_charging = False
         self.charge_remaining = charge_duration
         self.charging_station_pos = charging_station_pos
 

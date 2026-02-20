@@ -537,7 +537,7 @@ if __name__ == "__main__":
     orchestrator = IntegrationOrchestrator(config_path)
 
     t0 = time.time()
-    orchestrator.run_simulation(timesteps=200)
+    orchestrator.run_simulation(timesteps=400)
     tf = time.time()
 
     print(f"Simulation completed in {tf - t0} seconds.")
