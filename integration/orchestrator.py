@@ -75,7 +75,12 @@ class IntegrationOrchestrator:
         self.grid_map = GridMap(config_path)
         self.ca = TimeBasedCollisionAvoidance(self.grid_map)
 
-        agent_positions, induct_positions, eject_positions, charging_positions = self._load_config(config_path)
+        agent_positions, induct_positions, eject_positions, charging_positions, energy_config = self._load_config(config_path)
+        self.max_energy                  = energy_config['max_energy']
+        self.charge_duration             = energy_config['charge_duration']
+        self.charge_rate                 = energy_config['charge_rate']
+        self.charging_trigger_multiplier = energy_config['charging_trigger_multiplier']
+
         self._init_allocation(agent_positions, induct_positions, eject_positions)
         self._init_agent_states()
 
@@ -115,7 +120,15 @@ class IntegrationOrchestrator:
         charging_positions = [(charging_pos_flat[i], charging_pos_flat[i+1], charging_pos_flat[i+2], charging_pos_flat[i+3])
                                 for i in range(0, len(charging_pos_flat), 4)]
 
-        return agent_positions, induct_positions, eject_positions, charging_positions
+        energy_params = params.get('energy', {})
+        energy_config = {
+            'max_energy':                  int(energy_params.get('max_energy', 100)),
+            'charge_duration':             int(energy_params.get('charge_duration', 20)),
+            'charge_rate':                 int(energy_params.get('charge_rate', 1)),
+            'charging_trigger_multiplier': float(energy_params.get('charging_trigger_multiplier', 2.0)),
+        }
+
+        return agent_positions, induct_positions, eject_positions, charging_positions, energy_config
 
     def _init_allocation(self, agent_positions: List, induct_positions: List, eject_positions: List) -> None:
         """
@@ -155,7 +168,8 @@ class IntegrationOrchestrator:
         self.agent_states: List[AgentState] = []
         for gcbba_agent in self.gcbba_orchestrator_initial.agents:
             grid_pos = self.grid_map.continuous_to_grid(float(gcbba_agent.pos[0]), float(gcbba_agent.pos[1]), float(gcbba_agent.pos[2]))
-            self.agent_states.append(AgentState(agent_id=gcbba_agent.agent_id, initial_position=grid_pos, speed=gcbba_agent.speed, max_energy=100))
+            self.agent_states.append(AgentState(agent_id=gcbba_agent.agent_id, initial_position=grid_pos, speed=gcbba_agent.speed,
+                                                 max_energy=self.max_energy, charge_rate=self.charge_rate))
 
     def run_simulation(self, timesteps: int = 100) -> None:
         pbar = tqdm(range(timesteps), desc=f"Simulation ({self.allocation_method.upper()})", leave=True)
@@ -597,8 +611,8 @@ class IntegrationOrchestrator:
             if nearest_charging_station is None:
                 continue
 
-            if agent_state.needs_charging(dist):
-                agent_state.start_charging(nearest_charging_station)
+            if agent_state.needs_charging(dist, multiplier=self.charging_trigger_multiplier):
+                agent_state.start_charging(nearest_charging_station, charge_duration=self.charge_duration)
                 newly_charging_agents.append(agent_state.agent_id)
 
         return newly_charging_agents

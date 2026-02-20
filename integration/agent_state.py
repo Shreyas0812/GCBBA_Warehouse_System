@@ -38,7 +38,7 @@ class AgentState:
      - Provides methods to update execution state and retrieve current task info
     """
 
-    def __init__(self, agent_id: int, initial_position: Tuple[int, int, int], speed: float = 1.0, max_energy: int = 450):
+    def __init__(self, agent_id: int, initial_position: Tuple[int, int, int], speed: float = 1.0, max_energy: int = 100, charge_rate: int = 1):
         self.agent_id = agent_id
         self.pos = np.array(initial_position, dtype=np.int32)
         self.speed = speed
@@ -63,8 +63,9 @@ class AgentState:
         ]
 
         # energy management
-        self.max_energy:int = max_energy
-        self.energy:int = max_energy
+        self.max_energy: int = max_energy
+        self.energy: int = max_energy
+        self.charge_rate: int = charge_rate
         self.is_navigating_to_charger: bool = False
         self.is_charging: bool = False
         self.charge_remaining: int = 0 # timesteps remaining to finish charging when at a charging station
@@ -185,7 +186,7 @@ class AgentState:
         
         # Charging 
         if self.is_charging:
-            charging_complete = self.step_charging(charge_per_timestep=1)
+            charging_complete = self.step_charging(charge_per_timestep=self.charge_rate)
             self.position_history.append((self.pos[0], self.pos[1], self.pos[2], timestep))
             if charging_complete:
                 self.is_idle = True
@@ -414,9 +415,10 @@ class AgentState:
         
         return False
     
-    def needs_charging(self, nearest_charging_station_distance: int) -> bool:
+    def needs_charging(self, nearest_charging_station_distance: int, multiplier: float = 2.0) -> bool:
         """
-        Agent needs to have enough energy to reach the nearest charging station
+        Agent needs to have enough energy to reach the nearest charging station.
+        Triggers when energy <= multiplier * dist_to_charger (configurable via YAML).
         """
-        threshold = int(nearest_charging_station_distance * 2) # Add some buffer to ensure agent doesn't run out of energy before reaching station
+        threshold = int(nearest_charging_station_distance * multiplier)
         return self.energy <= threshold
