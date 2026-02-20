@@ -144,6 +144,15 @@ class AgentState:
 
         self.current_timestep = timestep
 
+        # Charging 
+        if self.is_charging:
+            charging_complete = self.step_charging()
+            self.position_history.append((self.pos[0], self.pos[1], self.pos[2], timestep))
+            if charging_complete:
+                self.is_idle = True
+                self.needs_new_path = False
+            return False # No task completion during charging
+
         if self.current_path is None or len(self.current_path) == 0:
             self.position_history.append((self.pos[0], self.pos[1], self.pos[2], timestep))
             return False
