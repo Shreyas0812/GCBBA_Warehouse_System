@@ -204,7 +204,7 @@ class IntegrationOrchestrator:
             ast.agent_id for ast in self.agent_states
             if prev_charging_busy.get(ast.agent_id) and not ast.is_charging and not ast.is_navigating_to_charger
         ]
-        newly_charging_agents = self._check_and_start_chargin()
+        newly_charging_agents = self._check_and_start_charging()
 
         if newly_available_agents:
             tqdm.write(f"Agents finished charging at timestep {self.current_timestep}: {newly_available_agents}")
@@ -490,7 +490,7 @@ class IntegrationOrchestrator:
 
         return int(best_dist) if best_dist != float('inf') else 0, best_pos
 
-    def _check_and_start_chargin(self) -> List[int]:
+    def _check_and_start_charging(self) -> List[int]:
         """
         Check if any agents need to start charging and update their state accordingly.
         Multiple agents may share the same physical charging station, but concurrent
