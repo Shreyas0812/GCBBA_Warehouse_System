@@ -155,7 +155,7 @@ class IntegrationOrchestrator:
         self.agent_states: List[AgentState] = []
         for gcbba_agent in self.gcbba_orchestrator_initial.agents:
             grid_pos = self.grid_map.continuous_to_grid(float(gcbba_agent.pos[0]), float(gcbba_agent.pos[1]), float(gcbba_agent.pos[2]))
-            self.agent_states.append(AgentState(agent_id=gcbba_agent.agent_id, initial_position=grid_pos, speed=gcbba_agent.speed, max_energy=150))
+            self.agent_states.append(AgentState(agent_id=gcbba_agent.agent_id, initial_position=grid_pos, speed=gcbba_agent.speed, max_energy=1000))
 
     def run_simulation(self, timesteps: int = 100) -> None:
         pbar = tqdm(range(timesteps), desc=f"Simulation ({self.allocation_method.upper()})", leave=True)
