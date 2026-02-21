@@ -122,7 +122,7 @@ create_gridworld_node:
       max_energy: 100                  # Maximum battery capacity (grid steps)
       charge_duration: 20              # Timesteps spent at charger per visit
       charge_rate: 1                   # Energy units restored per charging timestep
-      charging_trigger_multiplier: 2.0 # Trigger charging when energy <= multiplier * dist_to_charger
+      charging_trigger_multiplier: 3.0 # Trigger charging when energy <= multiplier * dist_to_charger
 
     # Charging stations - Dedicated docking cells inside the maintenance bay
     # Flattened array format: [x, y, z, station_id]
