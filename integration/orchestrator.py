@@ -24,7 +24,7 @@ from gcbba.GCBBA_Orchestrator import GCBBA_Orchestrator
 from baselines.SGA_Orchestrator import SGA_Orchestrator
 from baselines.CBBA_Orchestrator import CBBA_Orchestrator
 
-from gcbba.tools_warehouse import agent_init, create_graph_with_range, task_init
+from gcbba.tools_warehouse import agent_init, create_graph_with_range
 
 from integration.agent_state import AgentState
 
@@ -48,7 +48,10 @@ class IntegrationOrchestrator:
     
     def __init__(self, 
                  config_path: str, 
-                 tasks_per_induct_station: int = 10,
+                 task_arrival_rate: float = 0.1,
+                 induct_queue_capacity: int = 5,
+                 warmup_timesteps: int = 100,
+                 initial_tasks: int = 0,
                  comm_range: float = 30,
                  sp_lim: Tuple[float, float] = (1.0, 1.0),
                  rerun_interval: int = 10,
@@ -63,7 +66,10 @@ class IntegrationOrchestrator:
             raise ValueError(f"Invalid allocation method: {allocation_method}. Must be one of 'gcbba', 'sga', or 'cbba'.")
 
         self.allocation_method = allocation_method
-        self.tasks_per_induct_station = tasks_per_induct_station
+        self.task_arrival_rate = task_arrival_rate
+        self.induct_queue_capacity = induct_queue_capacity
+        self.warmup_timesteps = warmup_timesteps
+        self.initial_tasks = initial_tasks
         self.comm_range = comm_range
         self.sp_lim = sp_lim
         self.rerun_interval = rerun_interval
@@ -75,13 +81,23 @@ class IntegrationOrchestrator:
         self.grid_map = GridMap(config_path)
         self.ca = TimeBasedCollisionAvoidance(self.grid_map)
 
-        agent_positions, induct_positions, eject_positions, charging_positions, energy_config = self._load_config(config_path)
+        agent_positions, self.induct_positions, self.eject_positions, charging_positions, energy_config = self._load_config(config_path)
         self.max_energy                  = energy_config['max_energy']
         self.charge_duration             = energy_config['charge_duration']
         self.charge_rate                 = energy_config['charge_rate']
         self.charging_trigger_multiplier = energy_config['charging_trigger_multiplier']
 
-        self._init_allocation(agent_positions, induct_positions, eject_positions)
+        # Inject Task Variables
+        self._induct_last_injection: Dict[int, int] = {} # last timestep a task was injected at each induct station, keyed by induct station index
+        self._induct_queue_depth: Dict[int, int] = {i: 0 for i in range(len(self.induct_positions))} # tracks how many tasks are currently queued or pending injection at each induct station, keyed by induct station index
+        self._next_task_id: int = 0 # global task ID counter to ensure unique task IDs across the simulation
+        self._task_to_induct: Dict[int, int] = {}      # task_id → induct station index
+        self._task_injection_time: Dict[int, int] = {} # task_id → timestep injected
+        self._pending_task_ids: Set[int] = set()       # tasks not yet claimed by any agent
+        self._tasks_dropped_by_cap: int = 0            # count of tasks dropped due to induct queue capacity limits, for performance tracking and debugging
+        self._queue_depth_snapshots: List[float] = []   # for tracking average queue depth over time, can be used for analysis and tuning of induct queue capacity and task arrival rates
+
+        self._init_allocation(agent_positions)
         self._init_agent_states()
 
         # Simulation state variables
@@ -130,7 +146,7 @@ class IntegrationOrchestrator:
 
         return agent_positions, induct_positions, eject_positions, charging_positions, energy_config
 
-    def _init_allocation(self, agent_positions: List, induct_positions: List, eject_positions: List) -> None:
+    def _init_allocation(self, agent_positions: List) -> None:
         """
         Initialize the chosen allocation orchestrator (GCBBA, SGA, or CBBA) with the given configuration.
         """
@@ -145,24 +161,47 @@ class IntegrationOrchestrator:
                 D = max(nx.diameter(raw_graph.subgraph(c)) for c in nx.connected_components(raw_graph))
 
         agents = agent_init(agent_positions, sp_lim=self.sp_lim)
-        tasks = task_init(induct_positions, eject_positions, task_per_induct_station=self.tasks_per_induct_station)
 
-        if self.Lt is None:
-            nt = len(induct_positions) * self.tasks_per_induct_station
-            na = len(agent_positions)
-            Lt = int(np.ceil(nt / na))
-        else:
-            Lt = self.Lt
-
-        self.all_char_t: Dict[int, np.ndarray] = {i: tasks[i] for i in range(len(tasks))}
-        self.all_task_ids: Set[int] = set(self.all_char_t.keys())
+        self.all_char_t: Dict[int, np.ndarray] = {}
+        self.all_task_ids: Set[int] = set()
         self.all_char_a = agents   # List[np.array], indexed by agent index
         self.num_agents = len(agents)
 
-        # Initialize using GCBBA -- all methods share same agent and task initialization, so we can use the same parameters to create the orchestrator instance and then call the appropriate launch method
-        self.gcbba_orchestrator_initial = GCBBA_Orchestrator(G, D, tasks, agents, Lt)
+        if self.task_arrival_rate > 0:
+            arrival_interval = int(1.0 / self.task_arrival_rate)
+            self._induct_last_injection = {i: -arrival_interval for i in range(len(self.induct_positions))}  # Initialize to allow immediate injection
+        else:
+            self._induct_last_injection = {
+                i: 0 for i in range(len(self.induct_positions))
+            }
 
-        print(f"Orchestrator initialized with {self.num_agents} agents and {len(self.all_task_ids)} tasks.")
+        if self.initial_tasks > 0:
+            for i in range(self.initial_tasks):
+                induct_idx = i % len(self.induct_positions)
+                induct_pos = self.induct_positions[induct_idx]
+                eject_pos = self.eject_positions[np.random.randint(0, len(self.eject_positions))]
+                char_t = np.array([induct_pos[0], induct_pos[1], induct_pos[2], eject_pos[0], eject_pos[1], eject_pos[2]])
+                task_id = self._next_task_id
+                
+                self._next_task_id += 1
+                self.all_char_t[task_id] = char_t
+                self.all_task_ids.add(task_id)
+                self._task_to_induct[task_id] = induct_idx
+                self._task_injection_time[task_id] = 0  # Injected at timestep 0
+                self._pending_task_ids.add(task_id)
+
+        # Initialize using GCBBA -- all methods share same agent and task initialization, so we can use the same parameters to create the orchestrator instance and then call the appropriate launch method
+        # tasks added on first step
+        Lt = self.Lt if self.Lt is not None else 1
+        self.gcbba_orchestrator_initial = GCBBA_Orchestrator(G, D, [], agents, Lt)
+
+        if self.task_arrival_rate > 0:
+            print(f"Orchestrator initialized with {self.num_agents} agents. "
+                  f"Steady-state mode: arrival_rate={self.task_arrival_rate}/ts/station, "
+                  f"induct_queue_capacity={self.induct_queue_capacity}.")
+        else:
+            print(f"Orchestrator initialized with {self.num_agents} agents. "
+                  f"Batch mode: {self.initial_tasks} pre-generated tasks, no ongoing injection.")
 
     def _init_agent_states(self) -> None:
         self.agent_states: List[AgentState] = []
@@ -171,13 +210,52 @@ class IntegrationOrchestrator:
             self.agent_states.append(AgentState(agent_id=gcbba_agent.agent_id, initial_position=grid_pos, speed=gcbba_agent.speed,
                                                  max_energy=self.max_energy, charge_rate=self.charge_rate))
 
+    def _inject_new_tasks(self) -> List[int]:
+        """
+        Deterministic periodic task injection: one task per induct station every
+        arrival_interval timesteps. Tasks are skipped (counted as dropped) when the
+        station's queue is already at induct_queue_capacity.
+        Returns a list of newly injected task IDs.
+        """
+        if self.task_arrival_rate <= 0:
+            return []  # No ongoing task injection in batch mode
+
+        arrival_interval = max(1, round(1 / self.task_arrival_rate))
+        new_task_ids = []
+
+        for induct_idx, induct_pos in enumerate(self.induct_positions):
+            if (self.current_timestep - self._induct_last_injection[induct_idx]) < arrival_interval:
+                continue  # Not time to inject at this station yet
+                
+            self._induct_last_injection[induct_idx] = self.current_timestep
+
+            if self._induct_queue_depth[induct_idx] >= self.induct_queue_capacity:
+                self._tasks_dropped_by_cap += 1
+                # tqdm.write(f"[t={self.current_timestep}] Induct station {induct_idx} queue full (depth={self._induct_queue_depth[induct_idx]}). Dropping new task. Total dropped: {self._tasks_dropped_by_cap}")
+                continue  # Skip injection at this station due to capacity limit
+
+            eject_pos = self.eject_positions[np.random.randint(0, len(self.eject_positions))]
+            char_t = np.array([induct_pos[0], induct_pos[1], induct_pos[2], eject_pos[0], eject_pos[1], eject_pos[2]])
+            task_id = self._next_task_id
+            self._next_task_id += 1
+
+            self.all_char_t[task_id] = char_t
+            self.all_task_ids.add(task_id)
+            self._task_to_induct[task_id] = induct_idx
+            self._task_injection_time[task_id] = self.current_timestep
+            self._induct_queue_depth[induct_idx] += 1
+            self._pending_task_ids.add(task_id)
+            new_task_ids.append(task_id)
+
+        return new_task_ids
+
     def run_simulation(self, timesteps: int = 100) -> None:
         pbar = tqdm(range(timesteps), desc=f"Simulation ({self.allocation_method.upper()})", leave=True)
         for _ in pbar:
             events = self.step()
             done = len(self.completed_task_ids)
-            total = len(self.all_task_ids)
-            pbar.set_postfix(done=f"{done}/{total}", t=self.current_timestep, refresh=False)
+            q = float(np.mean(list(self._induct_queue_depth.values()))) if self._induct_queue_depth else 0
+            pbar.set_postfix(done=done, t=self.current_timestep, q=f"{q:.2f}", refresh=False)
             # Main simulation loop logic:
             # 1. Get current task assignments from GCBBA
             # 2. Update AgentState with new assignments
@@ -185,14 +263,18 @@ class IntegrationOrchestrator:
             # 4. Step simulation forward and update AgentState with new positions and task statuses
             # 5. Trigger GCBBA replanning at specified intervals or when certain conditions are met (e.g. task completion, new tasks added, rerun time etc.)
             
-            if self.completed_task_ids == self.all_task_ids:
-                tqdm.write(f"All tasks completed at timestep {self.current_timestep}. Ending simulation.")
+            if self.completed_task_ids >= self.all_task_ids and self.task_arrival_rate == 0 and self.all_task_ids:
+                tqdm.write(f"All {len(self.completed_task_ids)} tasks completed at t={self.current_timestep}.")
                 break
     
     def step(self) -> OrchestratorEvents:
         """
         Step the simulation forward by one timestep.
         """
+
+        # Inject tasks 
+        new_task_ids = self._inject_new_tasks()
+
         if self.current_timestep == 0 or self.last_gcbba_timestep < 0:
             self.run_allocation()
             self._plan_paths()
@@ -237,6 +319,12 @@ class IntegrationOrchestrator:
         if newly_charging_agents or newly_available_agents:
             self.run_allocation()
 
+        # New Task arrived and idle agents are available — trigger allocation immediately to assign them (instead of waiting for the next scheduled rerun)
+        if new_task_ids and self.last_gcbba_timestep != self.current_timestep:
+            if any(a.is_idle and not a.is_charging and not a.is_navigating_to_charger
+                   for a in self.agent_states):
+                self.run_allocation()
+
         self._plan_paths()
 
         # Check if we need to rerun GCBBA
@@ -245,6 +333,11 @@ class IntegrationOrchestrator:
         if events.gcbba_rerun and self.last_gcbba_timestep != self.current_timestep:
             self.run_allocation()
             self._plan_paths()  # Replan paths immediately after GCBBA to reflect new assignments
+
+        mean_depth = (
+            float(np.mean(list(self._induct_queue_depth.values()))) if self._induct_queue_depth else 0
+        )
+        self._queue_depth_snapshots.append(mean_depth)
         
         self.current_timestep += 1
         return events
@@ -381,6 +474,18 @@ class IntegrationOrchestrator:
         for active_pos, original_idx in enumerate(active_agent_indices):
             tasks_for_agent = gcbba_assignments_by_active_pos.get(active_pos, [])
             agent_state = self.agent_states[original_idx]
+
+            # Decrement queue depth for tasks being claimed for the first time
+            for task_dict in tasks_for_agent:
+                tid = task_dict['task_id']
+                if tid in self._pending_task_ids:
+                    self._pending_task_ids.discard(tid)
+                    induct_idx = self._task_to_induct.get(tid)
+                    if induct_idx is not None:
+                        self._induct_queue_depth[induct_idx] = max(
+                            0, self._induct_queue_depth[induct_idx] - 1
+                        )
+
             agent_state.update_from_gcbba(tasks_for_agent, self.current_timestep)
             if agent_state.has_tasks() and agent_state.current_path is None:
                 agent_state.needs_new_path = True
@@ -400,6 +505,9 @@ class IntegrationOrchestrator:
                 executing_task_ids.add(agent_state.current_task.task_id)
         return executing_task_ids
 
+    
+    
+    
     def _build_assignment_dict(self, assignment: List[List[int]]) -> Dict[int, List[int]]:
         assignments_dict: Dict[int, List[int]] = {}
 
@@ -538,6 +646,12 @@ class IntegrationOrchestrator:
         if completed_since_last >= batch_threshold and time_since_last_gcbba >= min_cooldown:
             gcbba_rerun = True  # Trigger GCBBA rerun if enough tasks have been completed since the last run and cooldown has passed
         
+        # Trigger re run when unassigned tasks are pending and idle agents are available
+        if not gcbba_rerun and self._pending_task_ids and time_since_last_gcbba >= min_cooldown:
+            if any(a.is_idle and not a.is_charging and not a.is_navigating_to_charger
+                   for a in self.agent_states):
+                gcbba_rerun = True
+
         # Handled via needs_new_plan flag in AgentState which triggers replanning (and indirectly GCBBA rerun if new paths are needed for assigned tasks)
         # elif stuck_agent_ids and time_since_last_gcbba >= min_cooldown:
         #     gcbba_rerun = True  # Trigger GCBBA rerun if there are stuck agents and cooldown has passed
@@ -548,6 +662,9 @@ class IntegrationOrchestrator:
             gcbba_rerun=gcbba_rerun
         )
 
+    
+    
+    
     #################### Energy and Charging Logic (Optional) ####################
     def _get_nearest_charger_from_pos(self, grid_pos: Tuple[int, int, int]) -> Tuple[Optional[int], Optional[Tuple[int, int, int]]]:
         """
