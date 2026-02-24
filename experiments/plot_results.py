@@ -37,6 +37,16 @@ Plots generated:
   24. Batch allocation scalability -- timing vs task count (log scale)
       Same structure as 23 but for batch mode; shows SGA 3x worse than GCBBA at tpi=20.
 
+  === New Metric Plots (both modes) ===
+  25. Task execution quality -- distance per task + charging abort rate
+      Distance/task measures assignment tightness; abort rate measures energy disruption.
+  26. Agent time breakdown -- stacked bar: working / idle / charging fractions
+      Shows how effectively each method utilises agent capacity.
+  27. Scaling exponent -- power-law fit (time ∝ n^k), annotated k per method
+      Rigorous empirical O(n^k) argument; GCBBA should show smallest k.
+  28. Decentralization penalty -- (SGA_metric - method_metric) / SGA_metric vs CR
+      Quantifies graceful degradation; CBBA collapses at low CR, GCBBA degrades gently.
+
 Usage:
   python plot_results.py <path_to_experiment_dir>
   python plot_results.py          # plots ALL experiment directories
@@ -229,6 +239,37 @@ def load_data(exp_dir: str) -> pd.DataFrame:
         )
     else:
         df["effective_throughput"] = 0.0
+
+    # --- New derived metrics ---
+
+    # Distance per completed task: measures path quality of allocation.
+    # Lower = tighter assignments, less wasted travel.
+    if "total_distance_all_agents" in df.columns:
+        df["distance_per_task"] = (
+            df["total_distance_all_agents"]
+            / df["num_tasks_completed"].replace(0, 1)
+        )
+    else:
+        df["distance_per_task"] = np.nan
+
+    # Task abort rate: fraction of tasks abandoned mid-execution for charging.
+    # High rate = energy management is disruptive to throughput.
+    if "num_tasks_aborted_for_charging" in df.columns:
+        df["task_abort_rate"] = (
+            df["num_tasks_aborted_for_charging"]
+            / df["num_tasks_completed"].replace(0, 1)
+        )
+    else:
+        df["task_abort_rate"] = np.nan
+
+    # Working fraction: agent-timesteps actually executing tasks.
+    # working + idle + charging = 1  (approximately; clipped to [0,1]).
+    if "avg_idle_ratio" in df.columns and "charging_time_fraction" in df.columns:
+        df["working_fraction"] = (
+            1.0 - df["avg_idle_ratio"] - df["charging_time_fraction"]
+        ).clip(lower=0.0, upper=1.0)
+    else:
+        df["working_fraction"] = np.nan
 
     return df
 
@@ -2120,6 +2161,360 @@ def generate_latex_table_ss(df: pd.DataFrame, plot_dir: str) -> None:
 
 
 # -----------------------------------------------------------------
+#  Plot 25: Task execution quality (distance per task + abort rate)
+# -----------------------------------------------------------------
+
+def plot_task_execution_quality(df: pd.DataFrame, plot_dir: str) -> None:
+    """
+    Two subplots per mode (SS / batch):
+      Left:  distance_per_task vs x_col — lower means tighter, more efficient assignments.
+      Right: task_abort_rate vs x_col   — fraction of tasks abandoned for charging.
+
+    Both metrics are allocation quality signals: a better allocation minimises
+    travel distance and avoids sending agents that are about to need charging.
+    """
+    for label_prefix, dfc, methods, x_col, x_label in [
+        ("Steady-State", _ss_clean_df(df), CANONICAL_SS_METHODS,    "task_arrival_rate", "Arrival Rate (tasks/ts/station)"),
+        ("Batch",        _batch_df(df),    CANONICAL_BATCH_METHODS,  "tasks_per_induct",  "Initial Tasks per Induct Station"),
+    ]:
+        if dfc.empty:
+            continue
+        if dfc["distance_per_task"].isna().all():
+            continue
+        methods_here = _canonical_methods_present(dfc, methods)
+        fig, axes = plt.subplots(1, 2, figsize=(13, 5))
+
+        # Left: distance per task
+        ax = axes[0]
+        for cfg in methods_here:
+            sub = dfc[dfc["config_name"] == cfg]
+            g = sub.groupby(x_col)["distance_per_task"].agg(["mean", "std"]).reset_index()
+            ax.errorbar(g[x_col], g["mean"], yerr=g["std"],
+                        label=get_label(cfg), color=get_color(cfg),
+                        marker="o", capsize=4, linewidth=2)
+        ax.set_xlabel(x_label)
+        ax.set_ylabel("Distance per Completed Task (grid steps)")
+        ax.set_title(f"Path Efficiency ({label_prefix})\n(lower = tighter assignments)")
+        ax.legend(fontsize=9)
+        ax.grid(alpha=0.3)
+        ax.set_ylim(bottom=0)
+
+        # Right: abort rate
+        ax = axes[1]
+        for cfg in methods_here:
+            sub = dfc[dfc["config_name"] == cfg]
+            g = sub.groupby(x_col)["task_abort_rate"].agg(["mean", "std"]).reset_index()
+            ax.errorbar(g[x_col], g["mean"] * 100, yerr=g["std"] * 100,
+                        label=get_label(cfg), color=get_color(cfg),
+                        marker="s", capsize=4, linewidth=2)
+        ax.set_xlabel(x_label)
+        ax.set_ylabel("Task Abort Rate (% of completed tasks)")
+        ax.set_title(f"Charging-Induced Task Aborts ({label_prefix})\n(lower = less disruptive energy management)")
+        ax.legend(fontsize=9)
+        ax.grid(alpha=0.3)
+        ax.set_ylim(bottom=0)
+
+        fig.suptitle(
+            f"Task Execution Quality ({label_prefix})\n"
+            "(path efficiency and energy disruption by allocation method)",
+            fontsize=13, y=1.03,
+        )
+        fig.tight_layout()
+        suffix = "ss" if label_prefix == "Steady-State" else "batch"
+        _savefig(fig, plot_dir, f"task_execution_quality_{suffix}")
+
+
+# -----------------------------------------------------------------
+#  Plot 26: Agent time breakdown (stacked bar)
+# -----------------------------------------------------------------
+
+def plot_agent_time_breakdown(df: pd.DataFrame, plot_dir: str) -> None:
+    """
+    Stacked bar chart: working / idle / charging fraction of agent-timesteps.
+
+    working   = 1 - idle - charging  (executing tasks or travelling to them)
+    idle      = avg_idle_ratio
+    charging  = charging_time_fraction
+
+    Shows how effectively each method utilises agents.  A good allocation
+    maximises working and minimises idle; charging should be similar across
+    methods (it is governed by the energy policy, not the allocator).
+    One chart per mode (SS / batch) at the highest x-value (most demanding).
+    """
+    for label_prefix, dfc, methods, x_col, x_label in [
+        ("Steady-State", _ss_clean_df(df), CANONICAL_SS_METHODS,    "task_arrival_rate", "Arrival Rate"),
+        ("Batch",        _batch_df(df),    CANONICAL_BATCH_METHODS,  "tasks_per_induct",  "Tasks/Induct"),
+    ]:
+        if dfc.empty:
+            continue
+        if dfc["working_fraction"].isna().all():
+            continue
+
+        methods_here = _canonical_methods_present(dfc, methods)
+        x_vals = sorted(dfc[x_col].unique())
+        n_x = len(x_vals)
+
+        fig, axes = plt.subplots(1, n_x, figsize=(4 * n_x, 5), sharey=True)
+        if n_x == 1:
+            axes = [axes]
+
+        colors_stack = {"working": "#2ecc71", "idle": "#95a5a6", "charging": "#e74c3c"}
+
+        for ax_idx, xv in enumerate(x_vals):
+            ax = axes[ax_idx]
+            df_x = dfc[dfc[x_col] == xv]
+            x = np.arange(len(methods_here))
+            width = 0.55
+
+            working_means, idle_means, charging_means = [], [], []
+            for cfg in methods_here:
+                sub = df_x[df_x["config_name"] == cfg]
+                working_means.append(sub["working_fraction"].mean() * 100)
+                idle_means.append(sub["avg_idle_ratio"].mean() * 100)
+                charging_means.append(sub["charging_time_fraction"].mean() * 100)
+
+            ax.bar(x, working_means,  width, label="Working",  color=colors_stack["working"],  alpha=0.85)
+            ax.bar(x, idle_means,     width, label="Idle",     color=colors_stack["idle"],     alpha=0.85,
+                   bottom=working_means)
+            ax.bar(x, charging_means, width, label="Charging", color=colors_stack["charging"], alpha=0.85,
+                   bottom=[w + i for w, i in zip(working_means, idle_means)])
+
+            ax.set_xticks(x)
+            ax.set_xticklabels(
+                [get_label(m).split("(")[0].strip() for m in methods_here],
+                rotation=15, ha="right", fontsize=9,
+            )
+            ax.set_title(f"{x_label}={xv}")
+            ax.set_ylim(0, 105)
+            ax.grid(axis="y", alpha=0.3)
+            if ax_idx == 0:
+                ax.set_ylabel("Agent-Timesteps (%)")
+                ax.legend(loc="upper right", fontsize=9)
+
+        fig.suptitle(
+            f"Agent Time Breakdown ({label_prefix})\n"
+            "(working = executing/travelling to tasks; idle = waiting; charging = energy management)",
+            fontsize=13, y=1.03,
+        )
+        fig.tight_layout()
+        suffix = "ss" if label_prefix == "Steady-State" else "batch"
+        _savefig(fig, plot_dir, f"agent_time_breakdown_{suffix}")
+
+
+# -----------------------------------------------------------------
+#  Plot 27: Scaling exponent (power-law fit)
+# -----------------------------------------------------------------
+
+def plot_scaling_exponent(df: pd.DataFrame, plot_dir: str) -> None:
+    """
+    Fits time = a * n^k to each method's allocation timing data and plots:
+      Left:  data + fitted curves (log-log axes so the power law is a straight line).
+      Right: bar chart of fitted exponent k per method.
+
+    k > 1 means super-linear scaling.  GCBBA should show smaller k than CBBA/SGA,
+    giving a rigorous empirical complexity argument.
+
+    For SS: n = arrival_rate (proxy for active task density).
+    For batch: n = tasks_per_induct (directly proportional to task count).
+    """
+    for label_prefix, dfc, methods, x_col, x_label in [
+        ("Steady-State", _ss_clean_df(df), CANONICAL_SS_METHODS,    "task_arrival_rate", "Arrival Rate (tasks/ts/station)"),
+        ("Batch",        _batch_df(df),    CANONICAL_BATCH_METHODS,  "tasks_per_induct",  "Initial Tasks per Induct Station"),
+    ]:
+        if dfc.empty:
+            continue
+        methods_here = _canonical_methods_present(dfc, methods)
+
+        fig, axes = plt.subplots(1, 2, figsize=(13, 5))
+
+        # Left: log-log scatter + fitted line
+        ax = axes[0]
+        exponents = {}
+        for cfg in methods_here:
+            sub = dfc[dfc["config_name"] == cfg]
+            g = (sub.groupby(x_col)["avg_gcbba_time_ms"]
+                 .mean().reset_index()
+                 .rename(columns={"avg_gcbba_time_ms": "mean"}))
+            g = g[g["mean"] > 0]
+            if len(g) < 2:
+                continue
+
+            ax.scatter(g[x_col], g["mean"], color=get_color(cfg),
+                       s=60, zorder=5, edgecolors="black", linewidth=0.4)
+
+            # Fit log(y) = k*log(x) + log(a)
+            log_x = np.log(g[x_col].values.astype(float))
+            log_y = np.log(g["mean"].values.astype(float))
+            k, log_a = np.polyfit(log_x, log_y, 1)
+            exponents[cfg] = k
+
+            x_fit = np.linspace(g[x_col].min(), g[x_col].max(), 100)
+            y_fit = np.exp(log_a) * x_fit ** k
+            ax.plot(x_fit, y_fit, color=get_color(cfg), linewidth=2,
+                    label=f"{get_label(cfg)}  (k={k:.2f})")
+
+        ax.set_xscale("log")
+        ax.set_yscale("log")
+        ax.set_xlabel(x_label)
+        ax.set_ylabel("Avg Allocation Time (ms)")
+        ax.set_title(f"Power-Law Fit: time ∝ n^k ({label_prefix})\n(log-log; slope = scaling exponent k)")
+        ax.legend(fontsize=9)
+        ax.grid(alpha=0.3, which="both")
+
+        # Right: bar chart of k values
+        ax = axes[1]
+        if exponents:
+            cfgs = list(exponents.keys())
+            k_vals = [exponents[c] for c in cfgs]
+            short_labels = [get_label(c).split("(")[0].strip() for c in cfgs]
+            bars = ax.bar(short_labels, k_vals,
+                          color=[get_color(c) for c in cfgs],
+                          alpha=0.85, edgecolor="black", linewidth=0.5)
+            ax.axhline(1.0, color="green", linestyle="--", linewidth=1.5,
+                       label="k=1 (linear scaling)")
+            ax.axhline(2.0, color="red", linestyle=":", linewidth=1.5,
+                       label="k=2 (quadratic)")
+            for bar, kv in zip(bars, k_vals):
+                ax.text(bar.get_x() + bar.get_width() / 2, kv + 0.05,
+                        f"{kv:.2f}", ha="center", va="bottom",
+                        fontsize=10, fontweight="bold")
+            ax.set_ylabel("Scaling Exponent k")
+            ax.set_title(f"Empirical Scaling Exponent per Method ({label_prefix})\n"
+                         "(k<1=sub-linear, k=1=linear, k>1=super-linear)")
+            ax.legend(fontsize=9)
+            ax.grid(axis="y", alpha=0.3)
+            ax.set_ylim(bottom=0)
+            ax.tick_params(axis="x", rotation=15)
+
+        fig.suptitle(
+            f"Allocation Scaling Exponents ({label_prefix}): time ∝ n^k\n"
+            "(higher k = worse scaling; GCBBA should show smallest k)",
+            fontsize=13, y=1.03,
+        )
+        fig.tight_layout()
+        suffix = "ss" if label_prefix == "Steady-State" else "batch"
+        _savefig(fig, plot_dir, f"scaling_exponent_{suffix}")
+
+
+# -----------------------------------------------------------------
+#  Plot 28: Decentralization penalty curve
+# -----------------------------------------------------------------
+
+def plot_decentralization_penalty(df: pd.DataFrame, plot_dir: str) -> None:
+    """
+    For each method (excluding SGA), plots:
+      penalty(CR) = (sga_metric - method_metric) / sga_metric * 100
+
+    Positive penalty = method is worse than SGA at that connectivity level.
+    CBBA's penalty should spike at low CR (consensus fails when isolated).
+    GCBBA's penalty should rise only gently (graceful degradation).
+    SGA = 0% by definition (centralized, no connectivity dependency).
+
+    SS metric:    throughput  (higher is better → penalty = (sga - method)/sga).
+    Batch metric: makespan    (lower is better  → penalty = (method - sga)/sga).
+    """
+    # --- Steady-state ---
+    dfc_ss = _ss_clean_df(df)
+    if not dfc_ss.empty and "throughput" in dfc_ss.columns:
+        # Use median arrival rate for clearest signal
+        ar_vals = sorted(dfc_ss["task_arrival_rate"].unique())
+        ar_focus = ar_vals[len(ar_vals) // 2]   # middle rate (e.g. 0.05)
+        df_ar = dfc_ss[dfc_ss["task_arrival_rate"] == ar_focus]
+        comm_ranges = sorted(df_ar["comm_range"].unique())
+
+        plot_methods = [m for m in CANONICAL_SS_METHODS
+                        if m != "sga" and m in df_ar["config_name"].unique()]
+
+        if plot_methods:
+            fig, ax = plt.subplots(figsize=(8, 5))
+            for cfg in plot_methods:
+                penalties, penalty_stds, valid_crs = [], [], []
+                for cr in comm_ranges:
+                    cr_df = df_ar[df_ar["comm_range"] == cr]
+                    sga_tp  = cr_df[cr_df["config_name"] == "sga"]["throughput"]
+                    meth_tp = cr_df[cr_df["config_name"] == cfg]["throughput"]
+                    if sga_tp.empty or meth_tp.empty:
+                        continue
+                    pen = (sga_tp.mean() - meth_tp.mean()) / max(sga_tp.mean(), 1e-9) * 100
+                    # std via error propagation (conservative)
+                    pen_std = np.sqrt(sga_tp.std()**2 + meth_tp.std()**2) / max(sga_tp.mean(), 1e-9) * 100
+                    penalties.append(pen)
+                    penalty_stds.append(pen_std if not np.isnan(pen_std) else 0)
+                    valid_crs.append(cr)
+                if valid_crs:
+                    ax.errorbar(valid_crs, penalties, yerr=penalty_stds,
+                                label=get_label(cfg), color=get_color(cfg),
+                                marker="o", capsize=4, linewidth=2)
+
+            ax.axhline(0, color="black", linestyle="--", linewidth=1.2,
+                       label="SGA baseline (0% penalty)")
+            ax.axvspan(0, CONNECTIVITY_THRESHOLD - 1, alpha=0.08, color="red",
+                       label="_nolegend_")
+            for cr in comm_ranges:
+                if cr in CR_ANNOTATIONS:
+                    ax.annotate(CR_ANNOTATIONS[cr], xy=(cr, ax.get_ylim()[0]),
+                                fontsize=7, ha="center", va="top", color="gray",
+                                style="italic", xytext=(0, -10),
+                                textcoords="offset points")
+            ax.set_xlabel("Communication Range")
+            ax.set_ylabel("Throughput Penalty vs SGA (%)")
+            ax.set_title(
+                f"Decentralization Penalty vs Communication Range (SS, ar={ar_focus})\n"
+                "(0% = matches SGA; positive = below SGA; negative = beats SGA)"
+            )
+            ax.legend(fontsize=9)
+            ax.grid(alpha=0.3)
+            fig.tight_layout()
+            _savefig(fig, plot_dir, "decentralization_penalty_ss")
+
+    # --- Batch ---
+    dfc_ba = _batch_df(df)
+    if not dfc_ba.empty and "effective_makespan" in dfc_ba.columns:
+        tpi_vals = sorted(dfc_ba["tasks_per_induct"].unique())
+        tpi_focus = tpi_vals[len(tpi_vals) // 2]
+        df_tpi = dfc_ba[dfc_ba["tasks_per_induct"] == tpi_focus]
+        comm_ranges = sorted(df_tpi["comm_range"].unique())
+
+        plot_methods = [m for m in CANONICAL_BATCH_METHODS
+                        if m != "sga_batch" and m in df_tpi["config_name"].unique()]
+
+        if plot_methods:
+            fig, ax = plt.subplots(figsize=(8, 5))
+            for cfg in plot_methods:
+                penalties, penalty_stds, valid_crs = [], [], []
+                for cr in comm_ranges:
+                    cr_df = df_tpi[df_tpi["comm_range"] == cr]
+                    sga_ms  = cr_df[cr_df["config_name"] == "sga_batch"]["effective_makespan"]
+                    meth_ms = cr_df[cr_df["config_name"] == cfg]["effective_makespan"]
+                    if sga_ms.empty or meth_ms.empty:
+                        continue
+                    pen = (meth_ms.mean() - sga_ms.mean()) / max(sga_ms.mean(), 1e-9) * 100
+                    pen_std = np.sqrt(sga_ms.std()**2 + meth_ms.std()**2) / max(sga_ms.mean(), 1e-9) * 100
+                    penalties.append(pen)
+                    penalty_stds.append(pen_std if not np.isnan(pen_std) else 0)
+                    valid_crs.append(cr)
+                if valid_crs:
+                    ax.errorbar(valid_crs, penalties, yerr=penalty_stds,
+                                label=get_label(cfg), color=get_color(cfg),
+                                marker="o", capsize=4, linewidth=2)
+
+            ax.axhline(0, color="black", linestyle="--", linewidth=1.2,
+                       label="SGA baseline (0% penalty)")
+            ax.axvspan(0, CONNECTIVITY_THRESHOLD - 1, alpha=0.08, color="red",
+                       label="_nolegend_")
+            ax.set_xlabel("Communication Range")
+            ax.set_ylabel("Makespan Penalty vs SGA (%)")
+            ax.set_title(
+                f"Decentralization Penalty vs Communication Range (Batch, tpi={tpi_focus})\n"
+                "(0% = matches SGA; positive = worse; negative = beats SGA)"
+            )
+            ax.legend(fontsize=9)
+            ax.grid(alpha=0.3)
+            fig.tight_layout()
+            _savefig(fig, plot_dir, "decentralization_penalty_batch")
+
+
+# -----------------------------------------------------------------
 #  Plot 24: Batch allocation scalability (timing vs task count, log scale)
 # -----------------------------------------------------------------
 
@@ -2240,6 +2635,12 @@ def _generate_plots_for(exp_dir: str, plot_dir: str) -> None:
     plot_throughput_vs_comm_range_ss(df, plot_dir)
     plot_allocation_scalability(df, plot_dir)        # SS: all data incl. ar=0.2
     plot_batch_allocation_scalability(df, plot_dir)  # batch: log scale, SGA vs GCBBA
+
+    # ── New metric plots (both modes) ─────────────────────────────
+    plot_task_execution_quality(df, plot_dir)    # distance/task + abort rate
+    plot_agent_time_breakdown(df, plot_dir)      # working / idle / charging stacked bar
+    plot_scaling_exponent(df, plot_dir)          # power-law fit, annotated k values
+    plot_decentralization_penalty(df, plot_dir)  # (sga - method) / sga vs comm_range
 
     # ── LaTeX tables ──────────────────────────────────────────────
     generate_latex_table(df, plot_dir)
