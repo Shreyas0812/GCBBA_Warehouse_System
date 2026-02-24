@@ -38,7 +38,3 @@ Desktop.ini
 
 results/experiments/
 results/plots/
-
-# Temporary - exclude experiment scripts
-experiments/run_experiments*
-experiments/plot_results*
