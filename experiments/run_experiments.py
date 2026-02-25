@@ -156,6 +156,12 @@ class RunMetrics:
 
     # ── Wall-clock timing ──
     wall_time_seconds: float = 0.0
+    # Per-timestep simulation step time (measures real-time feasibility).
+    # avg = mean cost of one tick; max = worst-case latency; std = consistency.
+    # All three cover allocation + path planning + agent state updates per step.
+    avg_step_time_ms: float = 0.0
+    max_step_time_ms: float = 0.0
+    std_step_time_ms: float = 0.0
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -188,6 +194,9 @@ class InstrumentedOrchestrator(IntegrationOrchestrator):
         # Snapshot of completed count at the point we DETECT the rerun, so we can
         # classify it in the same step() call where the trigger fires.
         self._completed_count_at_last_check = 0
+
+        # Per-timestep wall time (covers allocation + path planning + state updates)
+        self._step_times_ms: List[float] = []
 
         # Energy tracking
         # Transitions into is_navigating_to_charger (one per charge cycle per agent)
@@ -236,7 +245,9 @@ class InstrumentedOrchestrator(IntegrationOrchestrator):
             if state.is_navigating_to_charger
         }
 
+        _t0_step = time.perf_counter()
         events = super().step(*args, **kwargs)
+        self._step_times_ms.append((time.perf_counter() - _t0_step) * 1000.0)
 
         # ── Timeline ──
         self._tasks_completed_timeline.append(len(self.completed_task_ids))
@@ -547,6 +558,12 @@ class InstrumentedOrchestrator(IntegrationOrchestrator):
                 sat_count / len(self._queue_depth_snapshots), 4
             )
 
+        # Per-timestep step time
+        if self._step_times_ms:
+            m.avg_step_time_ms = round(float(np.mean(self._step_times_ms)), 3)
+            m.max_step_time_ms = round(float(max(self._step_times_ms)), 3)
+            m.std_step_time_ms = round(float(np.std(self._step_times_ms)), 3)
+
         # Build unique run ID — batch mode uses "it{N}" tag, steady-state uses "ar{rate}"
         if self.initial_tasks > 0 and task_arrival_rate == 0:
             m.run_id = f"{config_name}_it{self.initial_tasks}_cr{int(comm_range)}_s{seed}"
@@ -829,6 +846,7 @@ SUMMARY_FIELDS = [
     "avg_task_wait_time", "max_task_wait_time",
     "avg_queue_depth", "queue_saturation_fraction",
     "wall_time_seconds",
+    "avg_step_time_ms", "max_step_time_ms", "std_step_time_ms",
 ]
 
 

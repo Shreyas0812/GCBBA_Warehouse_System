@@ -56,6 +56,8 @@ Plots generated:
       Shows how quickly each method reaches steady state after t=0.
   33. Allocation time distribution -- violin + log-box from gcbba_run_durations_ms (json).
       Full empirical spread; tight distribution = predictable real-time behaviour.
+  34. Per-timestep wall time -- avg_step_time_ms / max_step_time_ms per method vs load.
+      Real-time feasibility: if avg < 1 s/tick the system can run at 1 Hz in deployment.
 
 Usage:
   python plot_results.py <path_to_experiment_dir>
@@ -3055,6 +3057,89 @@ def plot_allocation_time_distribution(exp_dir: str, df: pd.DataFrame, plot_dir: 
 
 
 # -----------------------------------------------------------------
+#  Plot 34: Per-timestep wall time (real-time feasibility)
+# -----------------------------------------------------------------
+
+def plot_step_wall_time(df: pd.DataFrame, plot_dir: str) -> None:
+    """
+    Plots avg_step_time_ms and max_step_time_ms per method vs load axis.
+
+    avg_step_time = mean cost of one simulation tick (allocation + path planning).
+    max_step_time = worst-case tick latency.
+
+    The 1000 ms reference line marks the real-time feasibility boundary:
+    if avg < 1 s/tick, the system can sustain a 1 Hz control loop in deployment.
+    GCBBA should stay well below this line; CBBA/SGA should breach it at high load.
+
+    Two rows × two columns:
+      Row 1: Steady-state (x = arrival rate)
+      Row 2: Batch        (x = tasks per induct)
+      Col 1: Average step time (with ±1 std error bars)
+      Col 2: Maximum step time (worst-case latency)
+    """
+    if "avg_step_time_ms" not in df.columns:
+        print("  [!] Skipping step_wall_time (avg_step_time_ms not in data — re-run experiments)")
+        return
+
+    has_ss    = not _ss_clean_df(df).empty
+    has_batch = not _batch_df(df).empty
+    if not has_ss and not has_batch:
+        return
+
+    rows = []
+    if has_ss:
+        rows.append(("Steady-State", _ss_clean_df(df), CANONICAL_SS_METHODS,
+                     "task_arrival_rate", "Arrival Rate (tasks/ts/station)"))
+    if has_batch:
+        rows.append(("Batch", _batch_df(df), CANONICAL_BATCH_METHODS,
+                     "tasks_per_induct", "Initial Tasks per Induct Station"))
+
+    fig, axes = plt.subplots(len(rows), 2, figsize=(13, 5 * len(rows)))
+    if len(rows) == 1:
+        axes = [axes]  # ensure 2D indexing
+
+    for row_idx, (label_prefix, dfc, methods, x_col, x_label) in enumerate(rows):
+        methods_here = _canonical_methods_present(dfc, methods)
+
+        for col_idx, (metric, ylabel, title_suffix) in enumerate([
+            ("avg_step_time_ms", "Avg Step Time (ms)", "Average (mean ± std)"),
+            ("max_step_time_ms", "Max Step Time (ms)", "Worst-Case (peak)"),
+        ]):
+            ax = axes[row_idx][col_idx]
+
+            for cfg in methods_here:
+                sub = dfc[dfc["config_name"] == cfg]
+                g = (sub.groupby(x_col)[metric]
+                     .agg(["mean", "std"])
+                     .reset_index())
+                yerr = g["std"] if col_idx == 0 else None
+                ax.errorbar(
+                    g[x_col], g["mean"], yerr=yerr,
+                    label=get_label(cfg), color=get_color(cfg),
+                    marker="o" if col_idx == 0 else "s",
+                    capsize=4, linewidth=2,
+                    linestyle="-" if col_idx == 0 else "--",
+                )
+
+            ax.axhline(1000, color="red", linestyle="--", linewidth=1.5, alpha=0.8,
+                       label="1 s/tick (real-time threshold)")
+            ax.set_xlabel(x_label)
+            ax.set_ylabel(ylabel)
+            ax.set_title(f"{label_prefix} — {title_suffix}")
+            ax.legend(fontsize=9)
+            ax.grid(alpha=0.3)
+            ax.set_ylim(bottom=0)
+
+    fig.suptitle(
+        "Per-Timestep Wall Time: Real-Time Feasibility\n"
+        "(Below 1 s/tick = feasible for 1 Hz deployment; GCBBA should stay under threshold)",
+        fontsize=13, y=1.02,
+    )
+    fig.tight_layout()
+    _savefig(fig, plot_dir, "step_wall_time")
+
+
+# -----------------------------------------------------------------
 #  Orchestrator
 # -----------------------------------------------------------------
 
@@ -3108,6 +3193,7 @@ def _generate_plots_for(exp_dir: str, plot_dir: str) -> None:
     plot_batch_failure_heatmap(df, plot_dir)             # Plot 31: cr×tpi heatmap
     plot_throughput_rampup(exp_dir, df, plot_dir)        # Plot 32: ramp-up curve (json)
     plot_allocation_time_distribution(exp_dir, df, plot_dir)  # Plot 33: violin/box (json)
+    plot_step_wall_time(df, plot_dir)                    # Plot 34: per-step wall time
 
     # ── LaTeX tables ──────────────────────────────────────────────
     generate_latex_table(df, plot_dir)
