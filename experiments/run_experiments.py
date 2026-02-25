@@ -825,6 +825,11 @@ def get_experiment_configs(mode: str = "full") -> List[Dict]:
     WARMUP_TIMESTEPS = 300   # increased from 200: more time for charging + queue to stabilise
     QUEUE_MAX_DEPTH = 10     # increased from 5: more realistic physical buffer per induct station
     BATCH_MAX_TIMESTEPS = 3000  # Batch mode needs more headroom to complete all tasks
+    # Pre-load steady-state runs with tasks so agents are active from t=0 and the
+    # warmup window captures loaded behaviour rather than empty-queue ramp-up.
+    # 2 × num_agents (6) = 12 gives every agent an immediate assignment without
+    # flooding the queues (capacity = QUEUE_MAX_DEPTH × 8 stations = 80 tasks).
+    SS_INITIAL_TASKS = 12
     # C2: CBBA/SGA are much slower per-call at high loads; cap timesteps to prevent
     # multi-hour runs.  At ar >= 0.1 the simulation is overloaded anyway.
     # With WARMUP_TIMESTEPS=300 a cap of 800 gives 500 ts of steady-state window.
@@ -839,6 +844,7 @@ def get_experiment_configs(mode: str = "full") -> List[Dict]:
             "config_name": "static",
             "allocation_method": "gcbba",
             "task_arrival_rate": ar,
+            "initial_tasks": SS_INITIAL_TASKS,
             "queue_max_depth": QUEUE_MAX_DEPTH,
             "warmup_timesteps": WARMUP_TIMESTEPS,
             "comm_range": cr,
@@ -855,6 +861,7 @@ def get_experiment_configs(mode: str = "full") -> List[Dict]:
                 "config_name": name,
                 "allocation_method": "gcbba",
                 "task_arrival_rate": ar,
+                "initial_tasks": SS_INITIAL_TASKS,
                 "queue_max_depth": QUEUE_MAX_DEPTH,
                 "warmup_timesteps": WARMUP_TIMESTEPS,
                 "comm_range": cr,
@@ -871,6 +878,7 @@ def get_experiment_configs(mode: str = "full") -> List[Dict]:
             "config_name": "cbba",
             "allocation_method": "cbba",
             "task_arrival_rate": ar,
+            "initial_tasks": SS_INITIAL_TASKS,
             "queue_max_depth": QUEUE_MAX_DEPTH,
             "warmup_timesteps": WARMUP_TIMESTEPS,
             "comm_range": cr,
@@ -887,6 +895,7 @@ def get_experiment_configs(mode: str = "full") -> List[Dict]:
             "config_name": "sga",
             "allocation_method": "sga",
             "task_arrival_rate": ar,
+            "initial_tasks": SS_INITIAL_TASKS,
             "queue_max_depth": QUEUE_MAX_DEPTH,
             "warmup_timesteps": WARMUP_TIMESTEPS,
             "comm_range": cr,
