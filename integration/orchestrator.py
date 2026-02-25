@@ -107,6 +107,7 @@ class IntegrationOrchestrator:
         self._completed_at_last_gcbba: int = 0  # Track how many tasks were completed at the time of the last GCBBA run to help determine when to trigger next run
 
         self.latest_assignment: List[List[int]] = []  # Store latest GCBBA assignment for reference in stepping logic
+        self._allocation_cancelled: bool = False  # Set by InstrumentedOrchestrator timeout to prevent zombie threads from mutating state
 
         # For Energy and Charging Logic — use dedicated charging stations from config
         self.charging_station_grid_positions = [
@@ -466,6 +467,11 @@ class IntegrationOrchestrator:
             f"Score={total_score:.2f}, Makespan={makespan:.2f}, Time={allocation_time_ms:.2f}ms"
         )
         
+        # If a timeout cancelled this call, bail out before mutating any state.
+        # The zombie thread may still reach this point after the main thread moved on.
+        if self._allocation_cancelled:
+            return
+
         self.latest_assignment = assignment
 
         # _build_assignment_dict uses 0-indexed positions (allocator output); remap to original agent indices

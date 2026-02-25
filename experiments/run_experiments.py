@@ -282,6 +282,7 @@ class InstrumentedOrchestrator(IntegrationOrchestrator):
         )
         if use_timeout:
             exc_box: List[Optional[Exception]] = [None]
+            self._allocation_cancelled = False  # Allow this call to write results
 
             def _target():
                 try:
@@ -293,6 +294,8 @@ class InstrumentedOrchestrator(IntegrationOrchestrator):
             thread.start()
             thread.join(timeout=self._allocation_timeout_s)
             if thread.is_alive():
+                # Prevent the zombie thread from mutating state when it eventually finishes
+                self._allocation_cancelled = True
                 self._num_allocation_timeouts += 1
                 print(
                     f"[t={self.current_timestep}] ALLOCATION TIMEOUT "
