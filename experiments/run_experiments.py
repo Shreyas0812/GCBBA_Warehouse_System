@@ -235,10 +235,6 @@ class InstrumentedOrchestrator(IntegrationOrchestrator):
         # We detect this by checking the same logic as _detect_events() uses.
         self._gcbba_batch_triggers = 0
         self._gcbba_interval_triggers = 0
-        # Snapshot of completed count at the point we DETECT the rerun, so we can
-        # classify it in the same step() call where the trigger fires.
-        self._completed_count_at_last_check = 0
-
         # A4: task count at each allocation call
         self._gcbba_tasks_per_run: List[int] = []
 
@@ -396,6 +392,11 @@ class InstrumentedOrchestrator(IntegrationOrchestrator):
             if state.is_navigating_to_charger
         }
 
+        # Trigger classification: capture _completed_at_last_gcbba BEFORE the step,
+        # because super().step() → run_allocation() updates it to the current count,
+        # making completed_since_last always 0 if read post-step.
+        completed_at_last_gcbba_before = self._completed_at_last_gcbba
+
         _t0_step = time.perf_counter()
         events = super().step(*args, **kwargs)
         self._step_times_ms.append((time.perf_counter() - _t0_step) * 1000.0)
@@ -421,7 +422,7 @@ class InstrumentedOrchestrator(IntegrationOrchestrator):
         if events.gcbba_rerun:
             batch_threshold = max(2, self.num_agents // 3)
             completed_since_last = (
-                len(self.completed_task_ids) - self._completed_at_last_gcbba
+                completed_before - completed_at_last_gcbba_before
             )
             if completed_since_last >= batch_threshold:
                 self._gcbba_batch_triggers += 1
