@@ -115,7 +115,7 @@ class IntegrationOrchestrator:
             for pos in charging_positions
         ]
 
-    def _load_config(self, config_path: str) -> Tuple[List, List, List, List]:
+    def _load_config(self, config_path: str) -> Tuple[List, List, List, List, Dict]:
         with open(config_path, 'r') as f:
             config = yaml.safe_load(f)
 
