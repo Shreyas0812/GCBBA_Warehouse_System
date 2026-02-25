@@ -23,9 +23,9 @@ Plots generated:
   16. Energy-performance scatter
 
   === Steady-State Mode (task_arrival_rate > 0) ===
-  NOTE: Plots 17-22 use only SS_PRIMARY_ARRIVAL_RATES=[0.02,0.05,0.1] for uniform
-        coverage (all methods × all CRs × all seeds).  ar=0.2 has partial CR data
-        for cbba/sga and is excluded from method-comparison plots.
+  NOTE: Plots 17-22 use SS_PRIMARY_ARRIVAL_RATES=[0.01,0.02,0.03,0.05,0.1,0.15,0.2].
+        All rates now have complete uniform coverage — C1 timeout + C2 capped timesteps
+        ensure cbba/sga always finish at high arrival rates.
   17. Throughput vs arrival rate (primary steady-state metric)
   18. Task wait time vs arrival rate
   19. Queue depth and saturation metrics vs arrival rate
@@ -170,10 +170,12 @@ CANONICAL_BATCH_METHODS = ["static_batch", "dynamic_batch", "cbba_batch", "sga_b
 CANONICAL_METHODS       = CANONICAL_SS_METHODS   # backward-compat alias
 
 # Arrival rates with complete, uniform data (all methods × all CRs × all seeds).
-# ar=0.2 is excluded here because cbba/sga only have partial CR coverage there.
-# Use _ss_clean_df() for any method-comparison plot.
-# Use _ss_df() only for the scalability/timing plot where partial data is still valid.
-SS_PRIMARY_ARRIVAL_RATES = [0.02, 0.05, 0.1]
+# All 7 rates are now primary: C1 (timeout) + C2 (capped timesteps) ensure cbba/sga
+# complete at high loads.  Throughput is tasks/ss_ts so the shorter cbba/sga window
+# (800 ts at ar>=0.1) still produces comparable rates.
+# Use _ss_clean_df() for method-comparison plots.
+# Use _ss_df() only for scalability/timing plots that include all data.
+SS_PRIMARY_ARRIVAL_RATES = [0.01, 0.02, 0.03, 0.05, 0.1, 0.15, 0.2]
 
 # Connectivity threshold (cr < this -> disconnected at t=0)
 CONNECTIVITY_THRESHOLD = 13

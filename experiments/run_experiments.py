@@ -738,8 +738,10 @@ def get_experiment_configs(mode: str = "full") -> List[Dict]:
 
     Arrival rate rationale (8 stations, ~6 agents, ~20 ts/task):
       Capacity ≈ 0.3 tasks/ts total → per-station ≈ 0.037 tasks/ts/station.
-      Sweep spans light load (0.02) through heavy overload (0.2) to expose
-      throughput saturation, queue buildup, and wait-time degradation.
+      0.01 → ~27% capacity (light)  |  0.03 → ~81% (near-knee)
+      0.05 → ~135% (slight overload)|  0.1  → ~270% (heavy)
+      0.15 → ~400%                   |  0.2  → ~540% (extreme)
+      Sweep captures light load, the saturation knee (~0.037), and severe overload.
     """
     configs = []
 
@@ -752,27 +754,27 @@ def get_experiment_configs(mode: str = "full") -> List[Dict]:
 
     elif mode == "medium":
         seeds = [42, 123, 456]
-        arrival_rates = [0.02, 0.05, 0.1]
+        arrival_rates = [0.01, 0.03, 0.05, 0.1]
         comm_ranges = [5, 8, 13, 45]
         rerun_intervals = [25, 50, 100]
         batch_task_counts = [40, 80, 160]
 
     else:  # full
         seeds = [42, 123, 456, 789, 1024]
-        arrival_rates = [0.02, 0.05, 0.1, 0.2]
+        arrival_rates = [0.01, 0.02, 0.03, 0.05, 0.1, 0.15, 0.2]
         comm_ranges = [3, 5, 8, 13, 20, 45]
         rerun_intervals = [10, 25, 50, 100, 200]
         batch_task_counts = [20, 40, 80, 160]
 
     STUCK_THRESHOLD = 15
     MAX_TIMESTEPS = 1500
-    WARMUP_TIMESTEPS = 200
-    QUEUE_MAX_DEPTH = 5
+    WARMUP_TIMESTEPS = 300   # increased from 200: more time for charging + queue to stabilise
+    QUEUE_MAX_DEPTH = 10     # increased from 5: more realistic physical buffer per induct station
     BATCH_MAX_TIMESTEPS = 3000  # Batch mode needs more headroom to complete all tasks
     # C2: CBBA/SGA are much slower per-call at high loads; cap timesteps to prevent
-    # multi-hour runs.  At ar >= 0.1 the simulation is overloaded anyway, so 600
-    # timesteps still gives a meaningful steady-state window (400 ts post-warmup).
-    CBBA_SGA_SS_CAPPED_TIMESTEPS = 600
+    # multi-hour runs.  At ar >= 0.1 the simulation is overloaded anyway.
+    # With WARMUP_TIMESTEPS=300 a cap of 800 gives 500 ts of steady-state window.
+    CBBA_SGA_SS_CAPPED_TIMESTEPS = 800
     ALLOCATION_TIMEOUT_S = 30.0  # C1: hard cap on a single allocation call
 
     for ar, cr in itertools.product(arrival_rates, comm_ranges):
